@@ -1,0 +1,150 @@
+{
+  "user": "Jamie Park",
+  "formats": {
+    "A_cafe_weekly_grid": {
+      "workplace": "Café A",
+      "name_in_file": "Jamie Park",
+      "challenge": "12h times without am/pm (6-1:30); decoy 'Jamie Lee'",
+      "shifts": [
+        {
+          "date": "2026-10-26",
+          "start": "06:00",
+          "end": "13:30"
+        },
+        {
+          "date": "2026-10-27",
+          "start": "07:00",
+          "end": "14:00"
+        },
+        {
+          "date": "2026-10-29",
+          "start": "06:00",
+          "end": "12:00"
+        },
+        {
+          "date": "2026-10-31",
+          "start": "08:00",
+          "end": "16:00"
+        }
+      ]
+    },
+    "B_restaurant_transposed": {
+      "workplace": "Restaurant B",
+      "name_in_file": "Park, J.",
+      "challenge": "names are columns, dates are rows; 'Last, F.' format; overnight 6p-12a; 'CL' = close",
+      "shifts": [
+        {
+          "date": "2026-10-27",
+          "start": "17:00",
+          "end": "22:00"
+        },
+        {
+          "date": "2026-10-30",
+          "start": "18:00",
+          "end": "00:00",
+          "note": "overnight: ends 2026-10-31 00:00"
+        },
+        {
+          "date": "2026-11-01",
+          "start": "11:00",
+          "end": "16:00"
+        }
+      ]
+    },
+    "C_bakery_korean": {
+      "workplace": "Bakery C",
+      "name_in_file": "박제이미",
+      "challenge": "Korean text; user name in Korean (needs alias); 휴무 = off",
+      "shifts": [
+        {
+          "date": "2026-10-28",
+          "start": "06:00",
+          "end": "11:00"
+        },
+        {
+          "date": "2026-11-01",
+          "start": "06:00",
+          "end": "10:00"
+        }
+      ]
+    },
+    "D_grocery_app_dark": {
+      "workplace": "Grocery D",
+      "name_in_file": null,
+      "challenge": "app screenshot, dark mode, card list, no name (personal schedule)",
+      "shifts": [
+        {
+          "date": "2026-10-26",
+          "start": "15:00",
+          "end": "21:00"
+        },
+        {
+          "date": "2026-10-29",
+          "start": "14:00",
+          "end": "20:00"
+        },
+        {
+          "date": "2026-10-31",
+          "start": "17:00",
+          "end": "22:00"
+        }
+      ]
+    },
+    "E_hotel_codes_2week": {
+      "workplace": "Hotel E",
+      "name_in_file": "J. Park",
+      "challenge": "shift codes resolved via legend; 2 weeks; decoy 'J. Parks'; overnight N",
+      "shifts": [
+        {
+          "date": "2026-10-30",
+          "start": "07:00",
+          "end": "15:00"
+        },
+        {
+          "date": "2026-11-02",
+          "start": "15:00",
+          "end": "23:00"
+        },
+        {
+          "date": "2026-11-06",
+          "start": "23:00",
+          "end": "07:00",
+          "note": "overnight: ends 2026-11-07 07:00"
+        },
+        {
+          "date": "2026-11-08",
+          "start": "07:00",
+          "end": "15:00"
+        }
+      ]
+    },
+    "F_diner_weekdays_colour": {
+      "workplace": "Diner F",
+      "name_in_file": "Jamie",
+      "week_of": "2026-10-25",
+      "challenge": "weekday names only, no dates (user confirms the week); coloured cells; first names only; 24h without leading zero (5:30 - 11:00)",
+      "shifts": [
+        {
+          "date": "2026-10-26",
+          "start": "05:30",
+          "end": "13:30"
+        },
+        {
+          "date": "2026-10-28",
+          "start": "10:00",
+          "end": "14:00"
+        },
+        {
+          "date": "2026-10-30",
+          "start": "13:30",
+          "end": "21:30"
+        },
+        {
+          "date": "2026-10-31",
+          "start": "05:30",
+          "end": "11:00"
+        }
+      ]
+    }
+  }
+}

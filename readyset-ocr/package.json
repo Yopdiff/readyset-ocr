@@ -1,0 +1,20 @@
+{
+  "name": "readyset-ocr",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test test/parser.test.mjs",
+    "ocr": "node test/dump.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "tesseract.js": "^5.1.1"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.5"
+  }
+}
