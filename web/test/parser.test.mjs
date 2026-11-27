@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import RS from '../parser.js';
+import { isUpToDate } from '../scripts/sync-ios.mjs';
 
 const expected = JSON.parse(fs.readFileSync(new URL('../../mock-schedules/expected.json', import.meta.url), 'utf8'));
 const NAMES = ['Jamie Park', '박제이미'];
@@ -80,4 +81,48 @@ test('buildICS: event, overnight end, both reminders', () => {
   assert.match(ics, /TRIGGER:-PT120M/);
   assert.match(ics, /TRIGGER:-PT1320M/);       // 8 PM the evening before an 18:00 shift = 22h
   assert.equal((ics.match(/BEGIN:VALARM/g) || []).length, 2);
+});
+
+test('OCR misreads of the dash (from the iOS app)', () => {
+  const t = (raw, start, end) => {
+    const r = RS.parseShift(raw);
+    assert.equal(r.kind, 'shift', raw);
+    assert.deepEqual([r.start, r.end], [start, end], raw);
+  };
+  t('4.830', '16:00', '20:30');       // dot instead of dash
+  t('630.930', '06:30', '09:30');
+  t('3.9', '15:00', '21:00');
+  assert.equal(RS.parseShift('3.5').kind, 'unknown');   // an hours total, not a shift
+  const close = (raw, start) => {
+    const r = RS.parseShift(raw);
+    assert.equal(r.kind, 'shift', raw);
+    assert.equal(r.start, start, raw);
+    assert.equal(r.toClose, true, raw);
+  };
+  close('4.CL', '16:00');
+  close('5CL', '17:00');              // dash vanished
+  close('SCL', '17:00');              // S read for 5
+  close('GCL', '18:00');              // G read for 6
+  close('5-CL', '17:00');             // closing shifts start in the afternoon
+  close('10-CL', '10:00');            // ...unless it is 10 or 11
+  for (const off of ['0ff', 'Of']) assert.equal(RS.parseShift(off).kind, 'off', off);
+});
+
+test('day-first dates (23-Nov) and checkbox before a name', () => {
+  // name column at x 0-80, date columns centred at 130, 220, 310
+  const cell = (y, text, x0, x1) => ({ text, x0, x1, y0: y, y1: y + 12 });
+  const row = (y, label, cells) => [...label, ...cells.map((t, i) => cell(y, t, 100 + i * 90, 160 + i * 90))];
+  const words = [
+    ...row(0, [cell(0, 'Name', 0, 40)], ['23-Nov', '24-Nov', '25-Nov']),
+    ...row(30, [cell(30, 'V', 0, 8), cell(30, 'Jamie', 14, 60)], ['9-5', 'OFF', '10-6']),
+    ...row(60, [cell(60, 'Cindy', 0, 50)], ['OFF', '9-5', 'OFF']),
+  ];
+  const out = RS.extractShifts(words, { names: ['Jamie'], refDate: new Date(2026, 10, 20) });
+  assert.equal(out.layout, 'grid');
+  assert.equal(out.match && out.match.label, 'Jamie');
+  assert.deepEqual(out.shifts.map((s) => s.date), ['2026-11-23', '2026-11-25']);
+});
+
+test('iOS copy of the parser is in sync (run: npm run sync-ios)', () => {
+  assert.ok(isUpToDate(), 'ios/ReadySet.swiftpm/ParserScript.swift differs from web/parser.js');
 });
