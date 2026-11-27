@@ -15,7 +15,8 @@ struct ContentView: View {
     
     @StateObject private var store = ShiftStore.persistent()   // 기기에 저장된 데이터
     @Environment(\.scenePhase) private var scenePhase          // 앱이 화면에 있는지
-    
+    @State private var hasSeenStorageWarning = false
+
     var body: some View {
         TabView(selection: $selectedTab) {
             HomeView(
@@ -50,6 +51,18 @@ struct ContentView: View {
             if phase == .active {
                 store.refreshReminders()
             }
+        }
+        // 저장소를 못 열었으면 알려 주기 (조용히 넘어가면 알람이 안 울리는 걸 사용자가 몰라요)
+        .alert(
+            "Couldn't open your saved shifts",
+            isPresented: Binding(
+                get: { store.isUsingTemporaryStorage && !hasSeenStorageWarning },
+                set: { if !$0 { hasSeenStorageWarning = true } }
+            )
+        ) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Shifts you add now won't be saved, and wake-up alarms won't be set. Please close and reopen the app.")
         }
     }
 }

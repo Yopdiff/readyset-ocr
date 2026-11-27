@@ -10,3 +10,12 @@ __MACOSX/
 xcuserdata/
 DerivedData/
 .build/
+
+# secrets and signing (never commit)
+.env
+.env.*
+*.p12
+*.p8
+*.pem
+*.key
+*.mobileprovision

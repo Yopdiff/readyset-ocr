@@ -7,6 +7,7 @@ Take a screenshot of your work schedule. ReadySet finds your shifts and sets you
 - `ios/` — the iPhone app (Swift). Open `ReadySet.swiftpm` in Xcode or Swift Playgrounds.
 - `web/` — browser prototype and the shared schedule parser (`parser.js`)
 - `mock-schedules/` — sample schedules for testing
+- `docs/` — notes, including the iOS code review and what's left to do
 
 ## Changing the parser
 
@@ -25,7 +26,7 @@ npm test
 
 ```bash
 cd web
-python -m http.server 5173
+python -m http.server 5173 --bind 127.0.0.1
 ```
 
-Then open http://localhost:5173.
+Then open http://localhost:5173. (`--bind 127.0.0.1` keeps other devices on your Wi-Fi from opening it.)

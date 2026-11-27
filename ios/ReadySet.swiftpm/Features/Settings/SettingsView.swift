@@ -62,7 +62,8 @@ struct SettingsView: View {
                         )
                     }
                     
-                    // TODO: 출시 전 삭제 (개발·테스트용)
+                    // 개발·테스트용: 디버그 빌드에서만 보여요 (출시용 Release 빌드에는 안 들어감)
+                    #if DEBUG
                     SettingsSection(title: "Developer") {
                         DeveloperRow(
                             title: "Load sample data",
@@ -83,6 +84,7 @@ struct SettingsView: View {
                         OCRTestLinkRow()
                         ReminderTestLinkRow()
                     }
+                    #endif
                 }
                 .foregroundStyle(AppColor.primary)
                 .padding(.horizontal, 24)

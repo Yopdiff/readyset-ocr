@@ -122,10 +122,8 @@ extension ParserOutput {
             guard let shiftDay = day(parsed.date), let start = time(parsed.start, on: shiftDay) else { return nil }
             var end: Date? = nil
             if let endText = parsed.end, let sameDayEnd = time(endText, on: shiftDay) {
-                // 종료가 시작보다 이르거나 같으면 다음 날 (밤샘 근무)
-                end = sameDayEnd <= start
-                ? calendar.date(byAdding: .day, value: 1, to: sameDayEnd)
-                : sameDayEnd
+                // 종료가 시작보다 이르거나 같으면 다음 날 (밤샘 근무) — 직접 입력할 때와 같은 규칙
+                end = CalendarMath.shiftEnd(start: start, endTime: sameDayEnd, calendar: calendar)
             }
             return ExtractedShift(
                 start: start,

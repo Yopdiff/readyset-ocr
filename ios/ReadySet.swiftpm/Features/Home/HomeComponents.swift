@@ -69,7 +69,8 @@ struct NextShiftCard: View {
     
     var body: some View {
         let settings = store.alarmSettings
-        let wakeUp = AlarmCalculator.wakeUpTime(for: shift, settings: settings)
+        // 실제로 예약되는 알람과 같은 규칙 (지난 알람, 근무 중인 시간의 알람은 없음)
+        let wakeUp = WakeAlarmPlanner.wakeUpTime(for: shift, among: store.shifts, settings: settings, now: now)
         let reminder = AlarmCalculator.nextReminder(for: shift, settings: settings, after: now)
         
         VStack(alignment: .leading, spacing: 0) {
@@ -99,11 +100,18 @@ struct NextShiftCard: View {
             Divider()
                 .padding(.vertical, 16)
             
-            AlarmInfoRow(
-                systemImage: "alarm",
-                title: wakeUp.relativeDayTimeText(now: now),
-                detail: "Wake-up alarm · \(TextFormat.longDuration(minutes: settings.wakeUpMinutesBefore)) before"
-            )
+            if let wakeUp {
+                AlarmInfoRow(
+                    systemImage: "alarm",
+                    title: wakeUp.relativeDayTimeText(now: now),
+                    detail: "Wake-up alarm · \(TextFormat.longDuration(minutes: settings.wakeUpMinutesBefore)) before"
+                )
+            } else {
+                AlarmInfoRow(
+                    systemImage: "alarm",
+                    detail: "No wake-up alarm for this shift"
+                )
+            }
             
             if let reminder {
                 AlarmInfoRow(

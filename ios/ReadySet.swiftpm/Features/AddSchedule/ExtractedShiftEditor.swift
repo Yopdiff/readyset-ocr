@@ -61,10 +61,7 @@ struct ExtractedShiftEditor: View {
     
     /// 시작과 종료가 같은 시계 시각(시·분)이면 저장 불가
     private var isValid: Bool {
-        let calendar = Calendar.current
-        let start = calendar.dateComponents([.hour, .minute], from: startTime)
-        let end = calendar.dateComponents([.hour, .minute], from: endTime)
-        return start.hour != end.hour || start.minute != end.minute
+        !CalendarMath.isSameClockTime(startTime, endTime)
     }
     
     // MARK: 화면
