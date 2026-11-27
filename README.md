@@ -1,27 +1,31 @@
 # ReadySet
 
-Turn a screenshot of your work schedule into calendar events with reminders.
-
-No AI, no server. Everything runs in your browser.
-
-## Run
-
-```bash
-cd readyset-ocr
-python -m http.server 5173
-```
-
-Open http://localhost:5173, upload a schedule screenshot (or tap a sample), check the shifts, and download the `.ics` file. It works with Google Calendar, Outlook and Apple Calendar.
-
-## Test
-
-```bash
-cd readyset-ocr
-npm install
-npm test
-```
+Take a screenshot of your work schedule. ReadySet finds your shifts and sets your wake-up alarms.
 
 ## Folders
 
-- `readyset-ocr/` — the app
-- `mock-schedules/` — sample schedules used for testing
+- `ios/` — the iPhone app (Swift). Open `ReadySet.swiftpm` in Xcode or Swift Playgrounds.
+- `web/` — browser prototype and the shared schedule parser (`parser.js`)
+- `mock-schedules/` — sample schedules for testing
+
+## Changing the parser
+
+`web/parser.js` is the only copy to edit. The iPhone app uses it too.
+
+```bash
+cd web
+npm install
+npm run sync-ios
+npm test
+```
+
+`npm run sync-ios` copies it into the app. `npm test` fails if you forget.
+
+## Try the web prototype
+
+```bash
+cd web
+python -m http.server 5173
+```
+
+Then open http://localhost:5173.

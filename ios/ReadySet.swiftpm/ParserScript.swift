@@ -1,3 +1,7 @@
+/// GENERATED from web/parser.js by `npm run sync-ios` (in web/). Do not edit here.
+/// Edit web/parser.js, then run the script again.
+enum ParserScript {
+    static let source = #"""
 /* ReadySet schedule parser — no AI, just geometry + patterns.
  *
  * Input : OCR words [{text, conf, x0, y0, x1, y1}] (any OCR engine) + the user's name(s).
@@ -64,7 +68,9 @@
     return best;
   }
 
-  const cleanLabel = (s) => s.replace(/^[\d\s|.,、。:;=_\-'"‘’“”`~]+|[\s|、。:;=_'"‘’“”`~]+$/g, '').replace(/\s+/g, ' ');
+  const cleanLabel = (s) => s.replace(/^[\d\s|.,、。:;=_\-'"‘’“”`~]+|[\s|、。:;=_'"‘’“”`~]+$/g, '').replace(/\s+/g, ' ')
+    // a checkbox in front of the name, read by OCR as "V", "✓", "□"…: "V Cindy" → "Cindy"
+    .replace(/^[vVxX✓✔☑☐□■]\s+(?=\p{L}{2})/u, '');
 
   // ------------------------------------------------------------------ times
   const MER = '(a\\.?m?\\.?|p\\.?m?\\.?)';
@@ -72,8 +78,22 @@
     // the colon is optional: OCR sometimes drops it ("530-1330"), and some rotas write "0600-1430"
     '(?<!\\d)(\\d{1,2})(?:[:.]?(\\d{2}))?\\s?' + MER + '?\\s?(?:[-–—~^%=_]{1,3}|\\bto\\b)\\s?' +
     '(?:(\\d{1,2})(?:[:.]?(\\d{2}))?\\s?' + MER + '?(?![\\d])|(cl|close|closing|마감))', 'i');
-  const OFF = /^(off|x|×|휴무|휴|쉼|[-–—]+|rest|day\s*off|not\s*scheduled|n\/a)$/i;
+  const OFF = /^([o0q]ff?|x|×|휴무|휴f?|휴|쉼|[-–—]+|rest|day\s*off|not\s*scheduled|n\/a)$/i;
   const NOISE = /^[\s=.,_:;'"`|。、]+|[\s=.,_:;'"`|。、]+$/g;
+
+  /**
+   * OCR often loses or garbles the dash in a shift:
+   *   "4.830" / "630.930" / "3.9" / "4.CL"  → a dot was read instead of the dash
+   *   "5CL" / "SCL" / "GCL"                  → the dash vanished (S = 5, G = 6)
+   * A dot followed by 0 or 5 ("3.5", "6.0", "5.50") is left alone: that is an hours total, not a shift.
+   */
+  function fixSeparators(text) {
+    return text
+      .replace(/\b[sS](?=-?(cl|close)\b)/gi, '5')
+      .replace(/\bG(?=-?(cl|close)\b)/gi, '6')   // i: "CL" is usually upper case
+      .replace(/(\d{1,4})\.(?=(?:\d{3,4}|[1-46-9])(?!\d)|cl\b|close\b)/gi, '$1-')
+      .replace(/(?<![\d:.\-])(\d{1,4})(?=(cl|close)\b)/gi, '$1-');
+  }
 
   const hhmm = (mins) => {
     mins = ((mins % 1440) + 1440) % 1440;
@@ -105,7 +125,7 @@
       const c = bare.toUpperCase().replace('×', 'X');
       if (codes[c]) return Object.assign({ code: c }, codes[c]);
     }
-    const m = TIME_RANGE.exec(bare);
+    const m = TIME_RANGE.exec(fixSeparators(bare));
     if (!m) return OFF.test(bare) ? { kind: 'off' } : { kind: 'unknown', raw: bare };
 
     const h1 = +m[1], m1 = +(m[2] || 0), mer1 = m[3] ? m[3][0].toLowerCase() : null;
@@ -128,7 +148,12 @@
       const s12 = (h1 % 12) * 60 + m1;
       if (mer1) s = to24(h1, mer1) + m1;
       else if (mer2) s = nearest([s12, s12 + 720], to24(h2, mer2) + m2, -1);
-      else { assumed = true; s = s12 + (h1 >= 5 && h1 <= 11 ? 0 : 720); }
+      else {
+        assumed = true;
+        // closing shifts ("5-CL", "530-CL") start in the afternoon; only 10 or 11 "-CL" is a morning start
+        const morning = toClose ? h1 >= 10 && h1 <= 11 : h1 >= 5 && h1 <= 11;
+        s = s12 + (morning ? 0 : 720);
+      }
       if (!toClose) e = mer2 ? to24(h2, mer2) + m2 : nearest([e12, e12 + 720], s, 1);
     }
     s %= 1440;
@@ -144,6 +169,11 @@
   const MONTH_RE = 'jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?';
   const WEEKDAY = /^(mon|tue|wed|thu|fri|sat|sun)[a-z]*[,.]?$|^[월화수목금토일](요일)?[,.]?$/i;
   const DATE_PATTERNS = [
+    // 23-Nov, 23 Nov, 23.Nov (day first). Listed before "Nov 24" so "23-Nov 24-Nov" isn't read as Nov 24.
+    {
+      re: new RegExp('(?<![\\d/])(\\d{1,2})[-\\s.]?(' + MONTH_RE + ')(?![a-z])', 'gi'),
+      md: (m) => [MONTHS.indexOf(m[2].slice(0, 3).toLowerCase()) + 1, +m[1]],
+    },
     // 10/26  (month/day)
     { re: /(?<![\d/])(\d{1,2})\s?\/\s?(\d{1,2})(?![\d/])/g, md: (m) => [+m[1], +m[2]] },
     // Oct 26, MonOct26, Nov l (OCR reads "1" as "l")
@@ -336,10 +366,16 @@
         if (i >= 0) cells[i].words.push(w);
       }
       const filled = cells.filter((c) => parseShift(joinWords(c.words), codes).kind !== 'empty').length;
-      if (letters(label).length < 2 || !filled) continue;
-      rows.push({ label, score: scoreName(label, names), cells });
+      if (letters(label).length < 2) continue;
+      rows.push({ label, score: scoreName(label, names), cells, filled, yc: l.yc });
     }
-    return rows;
+    // Keep a name even if none of its cells could be read (e.g. text on dark cells), as long as the row
+    // sits inside the table — between the first and last rows that do have shifts. Lines above or
+    // below the table (titles, legends, notes) are still ignored.
+    const ys = rows.filter((r) => r.filled).map((r) => r.yc);
+    if (!ys.length) return [];
+    const top = Math.min(...ys), bottom = Math.max(...ys);
+    return rows.filter((r) => r.filled || (r.yc >= top && r.yc <= bottom));
   }
 
   function parseTransposed(lines, dateLines, names) {
@@ -516,3 +552,5 @@
 
   return { extractShifts, parseShift, scoreName, buildICS, groupLines, findDates, findLegend, NAME_THRESHOLD };
 });
+"""#
+}
