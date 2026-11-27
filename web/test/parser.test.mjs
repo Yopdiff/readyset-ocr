@@ -124,5 +124,5 @@ test('day-first dates (23-Nov) and checkbox before a name', () => {
 });
 
 test('iOS copy of the parser is in sync (run: npm run sync-ios)', () => {
-  assert.ok(isUpToDate(), 'ios/ReadySet.swiftpm/ParserScript.swift differs from web/parser.js');
+  assert.ok(isUpToDate(), 'ios/ReadySet.swiftpm/Scanning/ParserScript.swift differs from web/parser.js');
 });

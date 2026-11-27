@@ -51,7 +51,7 @@ final class ShiftStore: ObservableObject {
     
     /// 실제 앱용: 기기 저장소를 열고, 실패하면 메모리 저장소로 대신 시작
     static func persistent() -> ShiftStore {
-            NotificationDelegate.shared.activate()
+        NotificationDelegate.shared.activate()
         do {
             let container = try ModelContainer(for: WorkplaceRecord.self, ShiftRecord.self)
             return ShiftStore(container: container)

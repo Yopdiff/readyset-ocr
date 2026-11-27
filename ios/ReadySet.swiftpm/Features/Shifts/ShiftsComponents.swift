@@ -213,8 +213,10 @@ struct ShiftDetailRow: View {
     @EnvironmentObject private var store: ShiftStore
     
     var body: some View {
-        let wakeUp = AlarmCalculator.wakeUpTime(for: shift, settings: store.alarmSettings)
-        
+        let now = Date.now
+        // 실제로 예약되는 알람과 같은 규칙
+        let wakeUp = WakeAlarmPlanner.wakeUpTime(for: shift, among: store.shifts, settings: store.alarmSettings, now: now)
+
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 WorkplaceLabel(workplace: shift.workplace, font: AppFont.montserrat(16, .semibold, relativeTo: .headline))
@@ -229,7 +231,12 @@ struct ShiftDetailRow: View {
             }
             
             Label(shift.timeRangeText, systemImage: "clock")
-            Label("Wake-up alarm: \(wakeUp.shortTimeText)", systemImage: "alarm")
+            if let wakeUp {
+                Label("Wake-up alarm: \(wakeUp.shortTimeText)", systemImage: "alarm")
+            } else if shift.start > now {
+                // 앞 근무 중이라 알람을 건너뛴 경우 (지난 근무는 아무것도 안 보여줌)
+                Label("No wake-up alarm", systemImage: "alarm")
+            }
         }
         .font(AppFont.montserrat(13, relativeTo: .subheadline))
     }

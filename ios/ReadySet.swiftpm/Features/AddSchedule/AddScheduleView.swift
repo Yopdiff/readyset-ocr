@@ -3,7 +3,9 @@ import PhotosUI
 
 struct AddScheduleView: View {
     var onFinish: () -> Void = { }
-    
+
+    @EnvironmentObject private var store: ShiftStore
+
     @State private var selectedItem: PhotosPickerItem?     // 앨범에서 고른 항목
     @State private var selectedImage: UIImage?             // 불러온 이미지
     @State private var isLoadingImage = false
@@ -122,9 +124,12 @@ struct AddScheduleView: View {
         isRecognizing = true
         defer { isRecognizing = false }
         
+        // 저장된 이름들: Vision이 이름을 헷갈려 읽었을 때 다른 후보 중 이 이름을 골라 써요
+        let knownNames = store.workplaces.flatMap { [$0.nameOnSchedule] + $0.aliases }
+
         do {
-            async let plainRead = TextRecognizer.recognizeWords(in: selectedImage)
-            async let cleanRead = try? TextRecognizer.recognizeWords(in: selectedImage, preprocess: true)
+            async let plainRead = TextRecognizer.recognizeWords(in: selectedImage, knownNames: knownNames)
+            async let cleanRead = try? TextRecognizer.recognizeWords(in: selectedImage, preprocess: true, knownNames: knownNames)
             let plainWords = try await plainRead
             let cleanWords = await cleanRead ?? []
             let words = OCRMerger.merge(plain: plainWords, preprocessed: cleanWords)
