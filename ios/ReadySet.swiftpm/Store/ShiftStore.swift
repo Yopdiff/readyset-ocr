@@ -10,7 +10,10 @@ final class ShiftStore: ObservableObject {
     @Published var alarmSettings: AlarmSettings {
         didSet { saveAlarmSettings() }
     }
-    
+    /// 기기 저장소를 열지 못해서 임시(메모리) 저장소로 돌고 있는지.
+    /// 이때는 저장도 안 되고 알람·리마인더도 예약되지 않아요 → 화면에서 알려 줘야 해요.
+    @Published private(set) var isUsingTemporaryStorage = false
+
     private let container: ModelContainer?                    // nil이면 저장 안 함 (프리뷰용)
     private var context: ModelContext? { container?.mainContext }
     private var syncTask: Task<Void, Never>?                  // 리마인더 다시 맞추는 작업
@@ -57,7 +60,9 @@ final class ShiftStore: ObservableObject {
             return ShiftStore(container: container)
         } catch {
             print("⚠️ Could not open saved data: \(error)")
-            return ShiftStore()
+            let store = ShiftStore()
+            store.isUsingTemporaryStorage = true
+            return store
         }
     }
     

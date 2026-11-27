@@ -78,18 +78,21 @@ struct ShiftFormView: View {
     
     /// 시작과 종료가 같은 시계 시각이면 안 됨
     private var isTimeValid: Bool {
-        let calendar = Calendar.current
-        let start = calendar.dateComponents([.hour, .minute], from: startTime)
-        let end = calendar.dateComponents([.hour, .minute], from: endTime)
-        return start.hour != end.hour || start.minute != end.minute
+        !CalendarMath.isSameClockTime(startTime, endTime)
     }
     
     private var canSave: Bool {
         selectedWorkplace != nil && isTimeValid
     }
     
-    private var wakeUpTime: Date {
-        startDate.addingTimeInterval(-Double(store.alarmSettings.wakeUpMinutesBefore) * 60)
+    /// 저장하면 실제로 예약될 Wake-up 알람 (지난 알람, 앞 근무 중인 알람은 nil)
+    private var wakeUpTime: Date? {
+        let draft = Shift(
+            id: originalShift?.id ?? UUID(),
+            workplace: selectedWorkplace ?? Workplace(name: ""),
+            start: startDate,
+            end: endDate)
+        return WakeAlarmPlanner.wakeUpTime(for: draft, among: store.shifts, settings: store.alarmSettings)
     }
     
     private var overlapping: Shift? {
@@ -127,7 +130,11 @@ struct ShiftFormView: View {
                         Text(isOvernight
                              ? "\(TextFormat.duration(from: startDate, to: endDate)) shift · Ends the next day, \(endDate.shortDayText)."
                              : "\(TextFormat.duration(from: startDate, to: endDate)) shift")
-                        Text("Wake-up alarm: \(wakeUpTime.relativeDayTimeText(now: startDate))")
+                        if let wakeUpTime {
+                            Text("Wake-up alarm: \(wakeUpTime.relativeDayTimeText(now: startDate))")
+                        } else {
+                            Text("No wake-up alarm for this shift.")
+                        }
                     }
                 }
             }
@@ -186,8 +193,7 @@ struct ShiftFormView: View {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
                 if let original = originalShift {
-                    store.deleteShift(original.id)
-                    // TODO (Phase 4): 이 근무의 알람·리마인더 취소
+                    store.deleteShift(original.id)   // 알람·리마인더는 저장소가 다시 맞춰요
                 }
                 finish()
             }
@@ -224,7 +230,7 @@ struct ShiftFormView: View {
             }
             store.updateShift(updated)
         }
-        // TODO (Phase 4): 이 근무의 알람·리마인더 예약/다시 예약
+        // 알람·리마인더는 저장소(ShiftStore)가 저장할 때마다 다시 맞춰요
         finish()
     }
     

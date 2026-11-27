@@ -13,6 +13,7 @@ struct AddScheduleView: View {
     
     @State private var isRecognizing = false               // 글자 읽는 중
     @State private var recognizedSchedule: RecognizedSchedule?
+    @State private var firstResult: ExtractionResult?       // 이름 없이 찾은 첫 결과 (Review에 넘김)
     @State private var recognitionFailed = false
     
     @State private var isShowingReview = false
@@ -85,7 +86,11 @@ struct AddScheduleView: View {
         }
         .navigationDestination(isPresented: $isShowingReview) {
             if let selectedImage, let recognizedSchedule {
-                ReviewScheduleView(image: selectedImage, schedule: recognizedSchedule, onFinish: onFinish)
+                ReviewScheduleView(
+                    image: selectedImage,
+                    schedule: recognizedSchedule,
+                    initialResult: firstResult,
+                    onFinish: onFinish)
             }
         }
         .navigationDestination(isPresented: $isShowingManualEntry) {
@@ -143,6 +148,7 @@ struct AddScheduleView: View {
             }
             
             recognizedSchedule = .fromOCR(words: words)
+            firstResult = check.toExtractionResult()
             isShowingReview = true
         } catch {
             recognitionFailed = true

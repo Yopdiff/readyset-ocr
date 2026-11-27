@@ -72,4 +72,11 @@ extension CalendarMath {
         }
         return sameDay
     }
+
+    /// 두 시각의 시·분이 같은지 (근무 시작과 종료가 같으면 저장할 수 없음)
+    static func isSameClockTime(_ a: Date, _ b: Date, calendar: Calendar = .current) -> Bool {
+        let first = calendar.dateComponents([.hour, .minute], from: a)
+        let second = calendar.dateComponents([.hour, .minute], from: b)
+        return first.hour == second.hour && first.minute == second.minute
+    }
 }

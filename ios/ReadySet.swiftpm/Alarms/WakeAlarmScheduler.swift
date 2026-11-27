@@ -53,8 +53,9 @@ enum WakeAlarmScheduler {
     static func apply(_ plan: [PlannedWakeAlarm]) async {
         let manager = AlarmManager.shared
 
-        // 1. 권한 (처음이면 물어보기)
+        // 1. 권한: 예약할 알람이 생겼을 때 처음 물어봐요 (앱을 켜자마자 묻지 않게)
         if manager.authorizationState == .notDetermined {
+            guard !plan.isEmpty else { return }
             _ = try? await manager.requestAuthorization()
         }
         guard manager.authorizationState == .authorized else { return }

@@ -27,11 +27,18 @@ struct ReviewScheduleView: View {
     
     @Environment(\.dismiss) private var dismiss
     
-    init(image: UIImage, schedule: RecognizedSchedule, onFinish: @escaping () -> Void = { }) {
+    /// - initialResult: 이미 구한 첫 결과 (Add Schedule에서 넘겨줌).
+    ///   SwiftUI는 화면을 다시 그릴 때마다 init을 부르기 때문에, 없을 때만 파서를 돌려요.
+    init(
+        image: UIImage,
+        schedule: RecognizedSchedule,
+        initialResult: ExtractionResult? = nil,
+        onFinish: @escaping () -> Void = { }
+    ) {
         self.image = image
         self.schedule = schedule
         self.onFinish = onFinish
-        _result = State(initialValue: schedule.extract([]))
+        _result = State(initialValue: initialResult ?? schedule.extract([]))
     }
     
     private struct RecognitionKey: Hashable {
