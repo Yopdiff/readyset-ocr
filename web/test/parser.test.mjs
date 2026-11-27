@@ -126,3 +126,14 @@ test('day-first dates (23-Nov) and checkbox before a name', () => {
 test('iOS copy of the parser is in sync (run: npm run sync-ios)', () => {
   assert.ok(isUpToDate(), 'ios/ReadySet.swiftpm/Scanning/ParserScript.swift differs from web/parser.js');
 });
+
+test('buildICS: a workplace name cannot inject calendar lines', () => {
+  const evil = 'Cafe\rEND:VEVENT\nBEGIN:VEVENT\r\nSUMMARY:x\u0000\u0007';
+  const ics = RS.buildICS([{ date: '2026-10-30', start: '09:00', end: '17:00' }],
+    { workplace: evil, wakeMinutes: 0, now: new Date(Date.UTC(2026, 9, 20)) });
+  // every line break in the file must be a real CRLF that we wrote, followed by a known property or a fold
+  const lines = ics.split('\r\n');
+  assert.ok(!/[\r\n]/.test(lines.join('')), 'stray CR or LF inside a line');
+  assert.equal(lines.filter((l) => l === 'BEGIN:VEVENT').length, 1);   // the name stays text inside SUMMARY
+  assert.ok(!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(ics), 'control characters must be removed');
+});

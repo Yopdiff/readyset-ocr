@@ -155,7 +155,11 @@ struct OCRTestView: View {
         guard let data = try? JSONEncoder().encode(words),
               let json = String(data: data, encoding: .utf8)
         else { return }
-        UIPasteboard.general.string = json
+        // 근무표에는 동료 이름이 들어 있어요: 이 기기에서만 붙여 넣을 수 있고(다른 기기로 동기화 안 됨) 2분 뒤 지워지게
+        UIPasteboard.general.setItems(
+            [["public.utf8-plain-text": json]],
+            options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)]
+        )
         didCopy = true
     }
 }

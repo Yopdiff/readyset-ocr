@@ -26,7 +26,7 @@ npm test
 
 ```bash
 cd web
-python -m http.server 5173
+python -m http.server 5173 --bind 127.0.0.1
 ```
 
-Then open http://localhost:5173.
+Then open http://localhost:5173. (`--bind 127.0.0.1` keeps other devices on your Wi-Fi from opening it.)

@@ -497,7 +497,12 @@
   }
 
   // ------------------------------------------------------------------ calendar export (.ics)
-  const icsEscape = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  // Text from the user (workplace name) must never start a new calendar line:
+  // any line break becomes "\n" text, and other control characters are dropped.
+  const icsEscape = (s) => String(s)
+    .replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,')
+    .replace(/\r\n|\r|\n/g, '\\n')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
   const icsFold = (line) => line.replace(/(.{60})(?=.)/gu, '$1\r\n ');
   const addDays = (isoDate, n) => {
     const [y, m, d] = isoDate.split('-').map(Number);
