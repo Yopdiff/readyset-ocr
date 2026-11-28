@@ -1,0 +1,2798 @@
+diff -ruN before/AboutView.swift after/AboutView.swift
+--- before/AboutView.swift	2026-11-27 21:03:54.739722608 -0600
++++ after/AboutView.swift	2026-11-27 21:03:54.745174086 -0600
+@@ -14,10 +14,11 @@
+                     .frame(maxWidth: .infinity, alignment: .leading)
+                     .padding(.top, 8)
+                 
+-                // TODO: 앱 아이콘 이미지가 생기면 교체
+-                RoundedRectangle(cornerRadius: 10)
+-                    .fill(AppColor.muted)
+-                    .frame(width: 64, height: 64)
++                // 앱 마스코트 (연보라 타일 위에서 숨 쉬듯 움직이고 가끔 깜빡임)
++                IdleMascot(size: 54)
++                    .offset(y: 4)
++                    .frame(width: 88, height: 88)
++                    .background(ScheduleLoadingView.cardColor, in: RoundedRectangle(cornerRadius: 20))
+                     .padding(.top, 32)
+                     .accessibilityHidden(true)
+                 
+diff -ruN before/AddScheduleView.swift after/AddScheduleView.swift
+--- before/AddScheduleView.swift	2026-11-27 21:03:54.738281198 -0600
++++ after/AddScheduleView.swift	2026-11-27 21:03:54.744001678 -0600
+@@ -4,6 +4,8 @@
+ struct AddScheduleView: View {
+     var onFinish: () -> Void = { }
+     
++    @EnvironmentObject private var tutorial: TutorialController
++    
+     @State private var selectedItem: PhotosPickerItem?     // 앨범에서 고른 항목
+     @State private var selectedImage: UIImage?             // 불러온 이미지
+     @State private var isLoadingImage = false
+@@ -13,6 +15,9 @@
+     @State private var recognizedSchedule: RecognizedSchedule?
+     @State private var recognitionFailed = false
+     
++    @State private var isShowingLoading = false            // 캐릭터 로딩 화면
++    @State private var isLoadingFinished = false           // 분석 완료 → 눈웃음 모션
++    
+     @State private var isShowingReview = false
+     @State private var isShowingManualEntry = false
+     
+@@ -37,6 +42,7 @@
+                 }
+                 .buttonStyle(.plain)
+                 .accessibilityLabel(selectedImage == nil ? "Choose schedule photo" : "Change schedule photo")
++                .tutorialTarget(.photoPicker)
+                 .padding(.top, 24)
+                 
+                 if loadFailed {
+@@ -59,9 +65,10 @@
+                     Task { await findShifts() }
+                 }
+                 .disabled(selectedImage == nil || isRecognizing)
++                .tutorialTarget(.findShiftsButton)
+                 
+                 Button {
+-                    isShowingManualEntry = true
++                    openManualEntry()
+                 } label: {
+                     Text("Enter shifts manually")
+                         .font(AppFont.montserrat(13, .medium, relativeTo: .subheadline))
+@@ -90,17 +97,23 @@
+             ShiftFormView(mode: .add(.now), onFinish: onFinish)
+         }
+         .alert("Couldn't read this image", isPresented: $recognitionFailed) {
+-            Button("Enter shifts manually") { isShowingManualEntry = true }
++            Button("Enter shifts manually") { openManualEntry() }
+             Button("Try another photo", role: .cancel) { }
+         } message: {
+             Text("Try a clearer screenshot of your schedule, or add your shifts yourself.")
+         }
+-        // 읽는 동안 로딩 카드 띄우기 + Back 버튼 숨기기
++        // 튜토리얼 말풍선 (분석 중·알림창이 있을 땐 숨김)
++        .tutorialOverlay(tutorial, showing: [.choosePhoto, .findShifts],
++                         isHidden: isShowingLoading || recognitionFailed)
++        // 분석 중: 캐릭터 로딩 카드 + Back 버튼 숨기기
+         .overlay {
+-            if isRecognizing { FindingShiftsOverlay().transition(.opacity) }
++            if isShowingLoading {
++                ScheduleLoadingView(isFinished: isLoadingFinished)
++                    .transition(.opacity)
++            }
+         }
+-        .animation(.easeInOut(duration: 0.2), value: isRecognizing)
+-        .navigationBarBackButtonHidden(isRecognizing)
++        .animation(.easeInOut(duration: 0.25), value: isShowingLoading)
++        .navigationBarBackButtonHidden(isShowingLoading)
+     }
+     
+     /// 고른 사진을 이미지로 불러오기
+@@ -114,12 +127,23 @@
+         selectedImage = image
+         loadFailed = (image == nil)
+         isLoadingImage = false
++        
++        if image != nil {
++            tutorial.advance(from: .choosePhoto, to: .findShifts)
++        }
++    }
++    
++    private func openManualEntry() {
++        tutorial.advance(fromAny: [.choosePhoto, .findShifts], to: .manualEntry)
++        isShowingManualEntry = true
+     }
+     
+-    /// Vision으로 글자를 읽고, 근무표 모양을 찾았으면 Review로 이동
++    /// Vision으로 글자를 읽고, 근무표 모양을 찾았으면 완료 모션 → Review로 이동
+     private func findShifts() async {
+         guard let selectedImage else { return }
+         isRecognizing = true
++        isLoadingFinished = false
++        isShowingLoading = true
+         defer { isRecognizing = false }
+         
+         do {
+@@ -133,16 +157,27 @@
+             guard let check = ScheduleParser.shared.extract(words: words, names: []),
+                   check.layout != "none"
+             else {
+-                recognitionFailed = true
++                showFailure()
+                 return
+             }
+             
++            // 실제 분석이 끝난 뒤에만: 완료 모션 → 잠깐 보여주고 → Review
+             recognizedSchedule = .fromOCR(words: words)
++            isLoadingFinished = true
++            try? await Task.sleep(for: .seconds(1.1))
++            tutorial.advance(from: .findShifts, to: .reviewWorkplace)
+             isShowingReview = true
++            isShowingLoading = false
+         } catch {
+-            recognitionFailed = true
++            showFailure()
+         }
+     }
++    
++    /// 실패: 눈웃음 없이 로딩을 닫고 알림창
++    private func showFailure() {
++        isShowingLoading = false
++        recognitionFailed = true
++    }
+ }
+ 
+ // MARK: - 점선 사진 선택 박스
+@@ -189,12 +224,5 @@
+         AddScheduleView()
+     }
+     .environmentObject(ShiftStore.sample)
+-}
+-
+-#Preview("Loading card") {
+-    NavigationStack {
+-        AddScheduleView()
+-            .overlay { FindingShiftsOverlay() }
+-    }
+-    .environmentObject(ShiftStore.sample)
++    .environmentObject(TutorialController())
+ }
+diff -ruN before/ClosingTime.swift after/ClosingTime.swift
+--- before/ClosingTime.swift	1969-12-31 17:00:00.000000000 -0700
++++ after/ClosingTime.swift	2026-11-27 21:03:54.743144692 -0600
+@@ -0,0 +1,82 @@
++import SwiftUI
++
++// MARK: - 마감 시간 계산
++
++extension Workplace {
++    /// 이 근무가 끝나는 마감 시각 (시작보다 이르면 다음 날). 마감 시간을 모르면 nil
++    func closingDate(after start: Date, calendar: Calendar = .current) -> Date? {
++        guard let closingMinutes,
++              let sameDay = calendar.date(bySettingHour: closingMinutes / 60,
++                                          minute: closingMinutes % 60,
++                                          second: 0, of: start)
++        else { return nil }
++        return sameDay <= start ? calendar.date(byAdding: .day, value: 1, to: sameDay) : sameDay
++    }
++}
++
++enum ClosingTime {
++    /// 1320 → "10:00 PM" (기기의 12/24시간 설정을 따름)
++    static func text(_ minutes: Int) -> String {
++        let date = Calendar.current.date(bySettingHour: minutes / 60, minute: minutes % 60,
++                                         second: 0, of: .now) ?? .now
++        return date.formatted(date: .omitted, time: .shortened)
++    }
++    
++    /// 시간 선택기의 Date → 자정부터 몇 분
++    static func minutes(from date: Date) -> Int {
++        let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
++        return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
++    }
++}
++
++// MARK: - Review의 "몇 시에 마감해요?" 카드
++
++struct ClosingTimeCard: View {
++    let workplaceName: String
++    let closeShiftCount: Int
++    let onSave: (Int) -> Void
++    
++    @State private var time: Date
++    
++    init(workplaceName: String, closeShiftCount: Int, initialMinutes: Int?, onSave: @escaping (Int) -> Void) {
++        self.workplaceName = workplaceName
++        self.closeShiftCount = closeShiftCount
++        self.onSave = onSave
++        let minutes = initialMinutes ?? 22 * 60      // 처음엔 오후 10시로 제안
++        _time = State(initialValue: Calendar.current.date(
++            bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: .now) ?? .now)
++    }
++    
++    var body: some View {
++        VStack(alignment: .leading, spacing: 0) {
++            Text("What time does \(workplaceName) close?")
++                .font(AppFont.montserrat(15, .semibold, relativeTo: .headline))
++            
++            Text("\(closeShiftCount) \(closeShiftCount == 1 ? "shift ends" : "shifts end") at closing (“CL”). We'll remember this for next time.")
++                .font(AppFont.montserrat(12, relativeTo: .footnote))
++                .foregroundStyle(AppColor.primary.opacity(0.7))
++                .padding(.top, 4)
++            
++            HStack {
++                Text("Closing time")
++                    .font(AppFont.montserrat(14, relativeTo: .subheadline))
++                Spacer()
++                DatePicker("Closing time", selection: $time, displayedComponents: .hourAndMinute)
++                    .labelsHidden()
++            }
++            .padding(.top, 14)
++            
++            PrimaryButton(title: "Use this time", minHeight: 44) {
++                onSave(ClosingTime.minutes(from: time))
++            }
++            .padding(.top, 14)
++        }
++        .padding(16)
++        .cardStyle()
++    }
++}
++
++#Preview {
++    ClosingTimeCard(workplaceName: "Café A", closeShiftCount: 3, initialMinutes: nil) { _ in }
++        .padding()
++}
+diff -ruN before/ContentView.swift after/ContentView.swift
+--- before/ContentView.swift	2026-11-27 21:03:54.741100154 -0600
++++ after/ContentView.swift	2026-11-27 21:03:54.746794599 -0600
+@@ -14,9 +14,48 @@
+     @State private var shiftsFocusDate: Date = .now
+     
+     @StateObject private var store = ShiftStore.persistent()   // 기기에 저장된 데이터
++    @StateObject private var tutorial = TutorialController()   // 튜토리얼 진행 상태
+     @Environment(\.scenePhase) private var scenePhase          // 앱이 화면에 있는지
++    @AppStorage(AppStorageKey.hasCompletedOnboarding) private var hasCompletedOnboarding = false
+     
+     var body: some View {
++        ZStack {
++            if hasCompletedOnboarding {
++                mainTabs
++                    .transition(.opacity)
++            } else {
++                OnboardingView()
++                    .transition(.opacity)
++            }
++        }
++        .animation(.easeInOut(duration: 0.35), value: hasCompletedOnboarding)
++        .preferredColorScheme(.light)
++        .environmentObject(store)
++        .environmentObject(tutorial)
++        // 앱으로 돌아올 때마다 (권한 창을 닫은 직후 포함) 리마인더 다시 맞추기
++        .onChange(of: scenePhase) { _, phase in
++            if phase == .active {
++                store.refreshReminders()
++            }
++        }
++        // 온보딩 끝 → (Show me how를 눌렀다면) 튜토리얼 시작
++        .onChange(of: hasCompletedOnboarding) { _, completed in
++            if completed {
++                selectedTab = .home
++                tutorial.startIfPending()
++            }
++        }
++        // 튜토리얼이 탭 이동을 요청하면 이동
++        .onChange(of: tutorial.requestedTab) { _, tab in
++            if let tab {
++                selectedTab = tab
++                tutorial.requestedTab = nil
++            }
++        }
++    }
++    
++    /// 기존 Home · Shifts · Settings 탭
++    private var mainTabs: some View {
+         TabView(selection: $selectedTab) {
+             HomeView(
+                 shifts: store.shifts,
+@@ -43,14 +82,6 @@
+                 .tag(AppTab.settings)
+         }
+         .tint(AppColor.primary)
+-        .preferredColorScheme(.light)
+-        .environmentObject(store)
+-        // 앱으로 돌아올 때마다 (권한 창을 닫은 직후 포함) 리마인더 다시 맞추기
+-        .onChange(of: scenePhase) { _, phase in
+-            if phase == .active {
+-                store.refreshReminders()
+-            }
+-        }
+     }
+ }
+ 
+diff -ruN before/HomeView.swift after/HomeView.swift
+--- before/HomeView.swift	2026-11-27 21:03:54.739296564 -0600
++++ after/HomeView.swift	2026-11-27 21:03:54.744805789 -0600
+@@ -5,6 +5,7 @@
+     var onOpenCalendar: (Date) -> Void = { _ in }   // NEXT SHIFT › 눌렀을 때
+     var onOpenList: () -> Void = { }                // See all › 눌렀을 때
+     
++    @EnvironmentObject private var tutorial: TutorialController
+     @State private var isShowingAddSchedule = false
+     
+     var body: some View {
+@@ -19,7 +20,7 @@
+                     HomeHeader(
+                         date: now,
+                         isDayOff: !ShiftSchedule.hasShift(in: shifts, on: now),
+-                        onAddTapped: { isShowingAddSchedule = true }
++                        onAddTapped: openAddSchedule
+                     )
+                     .padding(.top, 24)
+                     
+@@ -35,7 +36,8 @@
+                                 .padding(.top, 28)
+                         }
+                         
+-                        AddScheduleButton { isShowingAddSchedule = true }
++                        AddScheduleButton(action: openAddSchedule)
++                            .tutorialTarget(.addScheduleButton)
+                             .padding(.top, 20)
+                     } else {
+                         // 근무가 없을 때
+@@ -43,8 +45,9 @@
+                             .padding(.top, 64)
+                         
+                         PrimaryButton(title: "Add your first schedule", systemImage: "plus") {
+-                            isShowingAddSchedule = true
++                            openAddSchedule()
+                         }
++                        .tutorialTarget(.addScheduleButton)
+                         .padding(.top, 40)
+                     }
+                 }
+@@ -53,19 +56,31 @@
+             }
+             .background(AppColor.background)
+             .toolbar(.hidden, for: .navigationBar)
++            .tutorialOverlay(tutorial, showing: [.addSchedule, .shiftsAdded]) { step in
++                if step == .shiftsAdded {
++                    tutorial.goToSettings()
++                }
++            }
+             .navigationDestination(isPresented: $isShowingAddSchedule) {
+                 AddScheduleView(onFinish: { isShowingAddSchedule = false })
+             }
+         }
+     }
++    
++    private func openAddSchedule() {
++        tutorial.advance(from: .addSchedule, to: .choosePhoto)
++        isShowingAddSchedule = true
++    }
+ }
+ 
+ #Preview("With shifts") {
+     HomeView(shifts: SampleData.shifts)
+-         .environmentObject(ShiftStore.sample)
++        .environmentObject(ShiftStore.sample)
++        .environmentObject(TutorialController())
+ }
+ 
+ #Preview("Empty") {
+     HomeView(shifts: [])
+-         .environmentObject(ShiftStore.sample)
++        .environmentObject(ShiftStore.sample)
++        .environmentObject(TutorialController())
+ }
+diff -ruN before/ManageWorkplacesView.swift after/ManageWorkplacesView.swift
+--- before/ManageWorkplacesView.swift	2026-11-27 21:03:54.739663575 -0600
++++ after/ManageWorkplacesView.swift	2026-11-27 21:03:54.745111182 -0600
+@@ -77,8 +77,12 @@
+             WorkplaceDialog(
+                 title: "Add New Workplace",
+                 saveTitle: "Save Workplace",
+-                onSave: { name, nameOnSchedule in
+-                    store.addWorkplace(name: name, nameOnSchedule: nameOnSchedule)
++                onSave: { name, nameOnSchedule, closingMinutes in
++                    var workplace = store.addWorkplace(name: name, nameOnSchedule: nameOnSchedule)
++                    if closingMinutes != nil {
++                        workplace.closingMinutes = closingMinutes
++                        store.updateWorkplace(workplace)
++                    }
+                     close()
+                 },
+                 onClose: close
+@@ -90,11 +94,13 @@
+                 saveTitle: "Save Changes",
+                 initialName: workplace.name,
+                 initialNameOnSchedule: workplace.nameOnSchedule,
+-                onSave: { name, nameOnSchedule in
++                initialClosingMinutes: workplace.closingMinutes,
++                onSave: { name, nameOnSchedule, closingMinutes in
+                     // 창을 여는 동안 바뀌었을 수 있으니 최신 정보를 가져와 수정
+                     if var latest = store.workplaces.first(where: { $0.id == workplace.id }) {
+                         latest.name = name
+                         latest.nameOnSchedule = nameOnSchedule
++                        latest.closingMinutes = closingMinutes
+                         store.updateWorkplace(latest)
+                     }
+                     close()
+@@ -129,6 +135,17 @@
+     let onEdit: () -> Void
+     let onDelete: () -> Void
+     
++    /// "Employee name: Taylor · Closes 10:00 PM"
++    private var detailText: String {
++        var parts = [workplace.nameOnSchedule.isEmpty
++                     ? "No employee name"
++                     : "Employee name: \(workplace.nameOnSchedule)"]
++        if let minutes = workplace.closingMinutes {
++            parts.append("Closes \(ClosingTime.text(minutes))")
++        }
++        return parts.joined(separator: " · ")
++    }
++    
+     var body: some View {
+         HStack(spacing: 12) {
+             Button(action: onEdit) {
+@@ -138,11 +155,9 @@
+                         .accessibilityHidden(true)
+                     VStack(alignment: .leading, spacing: 2) {
+                         WorkplaceLabel(workplace: workplace, font: AppFont.montserrat(14, .semibold, relativeTo: .subheadline))
+-                        Text(workplace.nameOnSchedule.isEmpty
+-                             ? "No employee name"
+-                             : "Employee name: \(workplace.nameOnSchedule)")
+-                        .font(AppFont.montserrat(11, relativeTo: .caption))
+-                        .foregroundStyle(AppColor.primary.opacity(0.7))
++                        Text(detailText)
++                            .font(AppFont.montserrat(11, relativeTo: .caption))
++                            .foregroundStyle(AppColor.primary.opacity(0.7))
+                     }
+                     Spacer()
+                 }
+diff -ruN before/MascotAnimation.swift after/MascotAnimation.swift
+--- before/MascotAnimation.swift	1969-12-31 17:00:00.000000000 -0700
++++ after/MascotAnimation.swift	2026-11-27 21:03:54.744464846 -0600
+@@ -0,0 +1,338 @@
++import SwiftUI
++
++/// 반복 애니메이션 종류
++enum MascotAnimationStyle {
++    case bouncy     // 애니메이션 1: 늘어나고 통통 튀며 변신
++    case spin       // 애니메이션 2: 시계 방향으로 돌며 부드럽게 변신
++}
++
++// MARK: - 시간 → 모양·찌그러짐·눈 계산 (화면과 분리된 순수 계산)
++
++enum MascotMotion {
++    struct Frame {
++        var morph: Double
++        var squash: CGFloat
++    }
++    
++    /// 한 모양에서 머무는 비율 (나머지는 변신 시간). 클수록 변신이 빨라요.
++    static let holdFraction = 0.52
++    
++    // MARK: 애니메이션 1 (통통)
++    
++    /// time초일 때의 모양과 찌그러짐
++    static func frame(at time: TimeInterval, cycle: Double) -> Frame {
++        let segment = cycle / 4                                   // 모양 하나당 시간
++        let round = Int(time / cycle)                             // 몇 번째 바퀴인지
++        let t = time.truncatingRemainder(dividingBy: cycle)
++        let index = min(Int(t / segment), 3)
++        let local = (t - Double(index) * segment) / segment      // 0~1
++        
++        // 바퀴·모양마다 다른 값 (매번 똑같이 튀지 않게)
++        let seed = noise(round * 4 + index)
++        let strength = 0.8 + 0.45 * seed
++        
++        if local < holdFraction {
++            // 도착 후: 눌렸다가 천천히 출렁이며 가라앉음 (속도 × 0.9)
++            let h = local * segment
++            let frequency = (9 + 5 * noise(round * 4 + index + 100)) * 0.9
++            let wobble = 0.8 * strength * exp(-2.9 * h) * sin(frequency * h)
++            return Frame(morph: Double(index), squash: CGFloat(wobble))
++        } else {
++            // 변신 중
++            let u = (local - holdFraction) / (1 - holdFraction)
++            
++            // 모양: 살짝 뒤로 움츠렸다가 → 다음 모양을 살짝 지나쳤다 돌아옴
++            let eased = easeInOutBack(u, overshoot: 0.9)
++            
++            // 몸: 처음엔 살짝 눌렸다가(예비 동작) → 위로 쭉 늘어남
++            let anticipation = u < 0.2 ? 0.35 * strength * sin(Double.pi * u / 0.2) : 0
++            let stretchPart = max(0, (u - 0.15) / 0.85)
++            let stretch = -0.7 * strength * sin(Double.pi * stretchPart)
++            
++            return Frame(morph: Double(index) + eased, squash: CGFloat(anticipation + stretch))
++        }
++    }
++    
++    // MARK: 애니메이션 2 (회전)
++    
++    /// 머무는 시간은 짧게, 튀지 않고 부드럽게 돌며 변신
++    static func spinFrame(at time: TimeInterval, cycle: Double) -> Frame {
++        let segment = cycle / 4
++        let hold = 0.3
++        let t = time.truncatingRemainder(dividingBy: cycle)
++        let index = min(Int(t / segment), 3)
++        let local = (t - Double(index) * segment) / segment
++        
++        guard local >= hold else { return Frame(morph: Double(index), squash: 0) }
++        let u = (local - hold) / (1 - hold)
++        let eased = u * u * u * (u * (u * 6 - 15) + 10)          // 시작과 끝이 아주 부드러운 곡선
++        return Frame(morph: Double(index) + eased, squash: 0)
++    }
++    
++    // MARK: 눈
++    
++    /// 눈 뜬 정도: 1 다 뜸 ~ 0 감음 (8.4초 동안 불규칙하게 5번, 한 번은 두 번 연속)
++    static func eyeOpenness(at time: TimeInterval) -> CGFloat {
++        let blinkStarts: [Double] = [0.6, 2.4, 3.9, 4.15, 6.3]
++        let t = time.truncatingRemainder(dividingBy: 8.4)
++        var openness: Double = 1
++        for start in blinkStarts {
++            let d = t - start
++            if d >= 0 && d < 0.07 {
++                openness = min(openness, 1 - d / 0.07)           // 감는 중
++            } else if d >= 0.07 && d < 0.10 {
++                openness = 0                                     // 감은 상태
++            } else if d >= 0.10 && d < 0.19 {
++                openness = min(openness, (d - 0.10) / 0.09)      // 뜨는 중
++            }
++        }
++        return CGFloat(openness)
++    }
++    
++    // MARK: 도우미
++    
++    /// 시작과 끝에서 살짝 넘쳤다 돌아오는 곡선 (말랑한 느낌)
++    private static func easeInOutBack(_ x: Double, overshoot: Double) -> Double {
++        let c = overshoot * 1.525
++        if x < 0.5 {
++            let a = 2 * x
++            return (a * a * ((c + 1) * a - c)) / 2
++        } else {
++            let a = 2 * x - 2
++            return (a * a * ((c + 1) * a + c) + 2) / 2
++        }
++    }
++    
++    /// 같은 숫자에는 항상 같은 0~1 값 (불규칙하지만 예측 가능한 값)
++    private static func noise(_ n: Int) -> Double {
++        let x = sin(Double(n) * 12.9898) * 43758.5453
++        return x - floor(x)
++    }
++}
++
++// MARK: - 반복 애니메이션 마스코트 (재사용 컴포넌트)
++
++/// 계속 변신하다가, isFinished가 true가 되면 "띠롱!" 완료 모션
++struct AnimatedMascot: View {
++    var size: CGFloat = 140
++    var style: MascotAnimationStyle = .bouncy
++    var isFinished = false
++    var cycleDuration: Double = 4.6                 // 한 바퀴 시간 (속도 조절)
++    var showsDropShadow = true
++    var colors: [Color] = MascotView.defaultColors
++    
++    @Environment(\.accessibilityReduceMotion) private var reduceMotion
++    @State private var startDate = Date()
++    
++    // 완료 모션 상태
++    @State private var finishMorph: Double?         // 완료 후 모양 (nil이면 반복 중)
++    @State private var finishSquash: CGFloat = 0
++    @State private var finishTilt: Double = 0       // 오른쪽 들어올리기 각도
++    @State private var isSmiling = false
++    @State private var sparkleBurst: CGFloat = 0
++    @State private var sparkleOpacity: Double = 0
++    
++    var body: some View {
++        TimelineView(.animation(minimumInterval: nil, paused: finishMorph != nil)) { context in
++            let time = context.date.timeIntervalSince(startDate)
++            let looping = loopingFrame(at: time)
++            
++            MascotView(
++                size: size,
++                morph: finishMorph ?? looping.morph,
++                spinsWithMorph: style == .spin,
++                expression: isSmiling ? .happy : .normal,
++                eyeOpenness: finishMorph != nil ? 1 : MascotMotion.eyeOpenness(at: time),
++                squash: finishMorph != nil ? finishSquash : looping.squash,
++                tilt: finishTilt,
++                showsDropShadow: showsDropShadow,
++                colors: colors
++            )
++            .background {
++                // 캐릭터 뒤에서 양쪽으로 톡 튀어나오는 별
++                MascotStarBurst(size: size, burst: sparkleBurst, colors: colors)
++                    .opacity(sparkleOpacity)
++            }
++        }
++        .onChange(of: isFinished) { _, finished in
++            if finished { finish() }
++        }
++        .onAppear {
++            if isFinished { finish() }
++        }
++    }
++    
++    private func loopingFrame(at time: TimeInterval) -> MascotMotion.Frame {
++        if reduceMotion { return MascotMotion.Frame(morph: 0, squash: 0) }
++        switch style {
++        case .bouncy: return MascotMotion.frame(at: time, cycle: cycleDuration)
++        case .spin:   return MascotMotion.spinFrame(at: time, cycle: cycleDuration)
++        }
++    }
++    
++    /// 띠롱! 움츠리기 → 오른쪽 들어올리기(눈웃음 + 별) → 내려놓기
++    private func finish() {
++        guard finishMorph == nil else { return }
++        let time = Date().timeIntervalSince(startDate)
++        let current = loopingFrame(at: time).morph
++        let target = (current / 4).rounded() * 4
++        
++        if reduceMotion {
++            finishMorph = target
++            isSmiling = true
++            return
++        }
++        
++        // 1. 네모로 돌아오면서 살짝 움츠리기
++        withAnimation(.spring(duration: 0.45, bounce: 0.3)) {
++            finishMorph = target
++        }
++        withAnimation(.easeOut(duration: 0.12)) {
++            finishSquash = 0.5
++        }
++        
++        Task { @MainActor in
++            // 2. 띠롱! 오른쪽을 기우뚱 들어올리며 눈웃음 + 별이 톡톡
++            try? await Task.sleep(for: .seconds(0.12))
++            isSmiling = true
++            withAnimation(.spring(duration: 0.35, bounce: 0.45)) {
++                finishTilt = 10
++                finishSquash = -0.2
++            }
++            withAnimation(.spring(duration: 0.6, bounce: 0.5)) {
++                sparkleBurst = 1
++                sparkleOpacity = 1
++            }
++            
++            // 3. 잠깐 유지 → 통 내려놓으며 살짝 출렁, 별 사라짐
++            try? await Task.sleep(for: .seconds(0.5))
++            withAnimation(.spring(duration: 0.45, bounce: 0.45)) {
++                finishTilt = 0
++                finishSquash = 0
++            }
++            withAnimation(.easeOut(duration: 0.3)) {
++                sparkleOpacity = 0
++            }
++        }
++    }
++}
++
++// MARK: - 완료 별 (크기가 다른 별 3개가 양쪽에서 시간차로 톡톡)
++
++struct MascotStarBurst: View {
++    let size: CGFloat
++    var burst: CGFloat = 1                      // 0 숨김 → 1 다 튀어나옴
++    var colors: [Color] = MascotView.defaultColors
++    
++    /// 별 하나: 도착 위치(캐릭터 크기 기준), 크기, 나오는 순서(시간차), 회전
++    private struct StarSpec {
++        let x: CGFloat
++        let y: CGFloat
++        let scale: CGFloat
++        let delay: CGFloat
++        let angle: Double
++    }
++    
++    private let stars: [StarSpec] = [
++        StarSpec(x: 0.66, y: -0.28, scale: 0.22, delay: 0.00, angle: 14),    // 오른쪽 위, 큰 별
++        StarSpec(x: -0.64, y: -0.12, scale: 0.15, delay: 0.12, angle: -18),  // 왼쪽, 중간 별
++        StarSpec(x: 0.58, y: 0.16, scale: 0.10, delay: 0.22, angle: -8)      // 오른쪽 아래, 작은 별
++    ]
++    
++    var body: some View {
++        ZStack {
++            ForEach(stars.indices, id: \.self) { index in
++                starView(stars[index])
++            }
++        }
++        .accessibilityHidden(true)
++    }
++    
++    private func starView(_ star: StarSpec) -> some View {
++        // 자기 차례가 되면 0 → 1 (용수철 효과로 살짝 넘쳤다 돌아옴)
++        let progress = max(0, (burst - star.delay) / (1 - star.delay))
++        let travel = 0.4 + 0.6 * progress           // 캐릭터 가까이에서 바깥으로
++        return SparkleStar()
++            .fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
++            .frame(width: size * star.scale, height: size * star.scale)
++            .scaleEffect(progress)
++            .rotationEffect(.degrees(star.angle * Double(progress)))
++            .offset(x: size * star.x * travel, y: size * star.y * travel)
++    }
++}
++
++/// 통통한 작은 별 (로딩 중 변신하는 별과 같은 느낌)
++struct SparkleStar: Shape {
++    func path(in rect: CGRect) -> Path {
++        let count = 60
++        var points: [CGPoint] = []
++        for i in 0..<count {
++            let angle = -CGFloat.pi / 2 + 2 * CGFloat.pi * CGFloat(i) / CGFloat(count)
++            let wave = (cos(5 * (angle + CGFloat.pi / 2)) + 1) / 2
++            let radius = 0.30 + 0.20 * wave
++            points.append(CGPoint(x: rect.midX + rect.width * radius * cos(angle),
++                                  y: rect.midY + rect.height * radius * sin(angle)))
++        }
++        return MascotPath.closedPath(through: points)
++    }
++}
++
++// MARK: - 개발용 테스트 화면 (TODO: 출시 전 삭제)
++
++struct MascotAnimationTestView: View {
++    @State private var isFinished = false
++    @State private var runID = UUID()
++    
++    var body: some View {
++        VStack(spacing: 32) {
++            Spacer()
++            HStack(spacing: 40) {
++                VStack(spacing: 16) {
++                    AnimatedMascot(size: 130, style: .bouncy, isFinished: isFinished, cycleDuration: 3.6)
++                    Text("Animation 1")
++                        .font(AppFont.montserrat(14, .semibold, relativeTo: .headline))
++                }
++                VStack(spacing: 16) {
++                    AnimatedMascot(size: 130, style: .spin, isFinished: isFinished, cycleDuration: 3.6)
++                    Text("Animation 2")
++                        .font(AppFont.montserrat(14, .semibold, relativeTo: .headline))
++                }
++            }
++            .id(runID)
++            
++            Text(isFinished ? "Done!" : "Looping…")
++                .font(AppFont.montserrat(13, relativeTo: .subheadline))
++                .foregroundStyle(AppColor.primary.opacity(0.7))
++            Spacer()
++            Button(isFinished ? "Restart" : "Finish") {
++                if isFinished {
++                    isFinished = false
++                    runID = UUID()          // 처음부터 다시
++                } else {
++                    isFinished = true
++                }
++            }
++            .buttonStyle(.borderedProminent)
++            .tint(AppColor.primary)
++        }
++        .padding(24)
++        .navigationTitle("Mascot animation")
++    }
++}
++
++struct MascotAnimationTestLinkRow: View {
++    var body: some View {
++        NavigationLink {
++            MascotAnimationTestView()
++        } label: {
++            Text("Mascot animation")
++        }
++    }
++}
++
++#Preview {
++    HStack(spacing: 32) {
++        AnimatedMascot(size: 120, style: .bouncy)
++        AnimatedMascot(size: 120, style: .spin)
++    }
++}
+diff -ruN before/MascotShape.swift after/MascotShape.swift
+--- before/MascotShape.swift	1969-12-31 17:00:00.000000000 -0700
++++ after/MascotShape.swift	2026-11-27 21:03:54.744973266 -0600
+@@ -0,0 +1,131 @@
++import SwiftUI
++
++/// 마스코트가 변신하는 모양 (이 순서대로 바뀜)
++enum MascotForm: Int, CaseIterable {
++    case square, circle, flower, star
++}
++
++// MARK: - 모양 = 각도별 반지름 목록
++
++/// 모든 모양을 "중심에서 각 방향까지의 거리" 120개로 표현
++/// → 점 개수가 같아서, 섞기만 하면 자연스럽게 변신해요.
++struct MascotOutline {
++    static let sampleCount = 120
++    let radii: [CGFloat]          // 0~1 상자 기준 거리
++    
++    /// index번째 방향의 각도 (맨 위에서 시작, 시계 방향)
++    static func angle(at index: Int) -> CGFloat {
++        -CGFloat.pi / 2 + 2 * CGFloat.pi * CGFloat(index) / CGFloat(sampleCount)
++    }
++    
++    /// 네모 → 동그라미 → 꽃 → 별 순서의 모양들 (한 번만 계산)
++    static let all: [MascotOutline] = MascotForm.allCases.map { make($0) }
++    
++    /// progress: 0 네모, 1 동그라미, 2 꽃, 3 별, 4 다시 네모 (소수는 그 사이)
++    static func blended(_ progress: Double) -> [CGFloat] {
++        let count = Double(all.count)
++        var value = progress.truncatingRemainder(dividingBy: count)
++        if value < 0 { value += count }
++        let index = Int(value)
++        let fraction = CGFloat(value - Double(index))
++        let from = all[index].radii
++        let to = all[(index + 1) % all.count].radii
++        return zip(from, to).map { a, b in a + (b - a) * fraction }
++    }
++    
++    private static func make(_ form: MascotForm) -> MascotOutline {
++        if form == .square { return MascotOutline(radii: squareRadii) }
++        
++        let radii: [CGFloat] = (0..<sampleCount).map { index in
++            let phase = angle(at: index) + CGFloat.pi / 2      // 맨 위 = 0
++            switch form {
++            case .circle:
++                // 아주 살짝 찌그러진 동그라미
++                let wobble = 1 + 0.025 * sin(2 * phase + 1.2) + 0.015 * sin(3 * phase + 0.3)
++                return 0.46 * wobble
++            case .flower:
++                // 둥근 꽃잎 6장 + 꽃잎마다 크기가 조금씩 다르게
++                let petals = 0.40 + 0.13 * pow(abs(cos(3 * (phase + 0.06))), 0.6)
++                let wobble = 1 + 0.05 * sin(phase + 0.8) + 0.03 * sin(2 * phase + 2.1)
++                return petals * wobble
++            case .star:
++                // 통통한 별 + 팔 길이가 조금씩 다르게
++                let wave = (cos(5 * (phase + 0.05)) + 1) / 2
++                let star = 0.33 + 0.15 * wave
++                let wobble = 1 + 0.05 * sin(phase + 2.3) + 0.03 * sin(3 * phase + 0.4)
++                return star * wobble
++            case .square:
++                return 0.5
++            }
++        }
++        return MascotOutline(radii: radii)
++    }
++    
++    /// 기본 캐릭터 실루엣: 첨부 이미지의 테두리를 120개 방향에서 측정한 값
++    /// (맨 위에서 시작해 시계 방향)
++    private static let squareRadii: [CGFloat] = [
++        0.470, 0.466, 0.462, 0.459, 0.458, 0.458, 0.461, 0.463, 0.466, 0.470,
++        0.478, 0.487, 0.500, 0.517, 0.539, 0.562, 0.583, 0.594, 0.594, 0.588,
++        0.576, 0.562, 0.546, 0.531, 0.517, 0.506, 0.496, 0.488, 0.481, 0.476,
++        0.472, 0.469, 0.468, 0.468, 0.470, 0.474, 0.479, 0.486, 0.495, 0.506,
++        0.519, 0.534, 0.552, 0.573, 0.594, 0.609, 0.614, 0.612, 0.602, 0.588,
++        0.574, 0.560, 0.547, 0.535, 0.525, 0.516, 0.507, 0.499, 0.492, 0.486,
++        0.481, 0.478, 0.477, 0.478, 0.480, 0.483, 0.489, 0.498, 0.511, 0.531,
++        0.555, 0.581, 0.604, 0.618, 0.621, 0.615, 0.600, 0.579, 0.557, 0.538,
++        0.521, 0.507, 0.495, 0.486, 0.478, 0.472, 0.468, 0.466, 0.465, 0.465,
++        0.468, 0.472, 0.477, 0.484, 0.492, 0.502, 0.513, 0.527, 0.543, 0.560,
++        0.578, 0.597, 0.616, 0.633, 0.647, 0.653, 0.649, 0.637, 0.618, 0.598,
++        0.579, 0.562, 0.546, 0.533, 0.521, 0.510, 0.501, 0.491, 0.482, 0.476
++    ]
++}
++
++// MARK: - 매끄러운 곡선 도우미
++
++enum MascotPath {
++    /// 점들을 모두 지나는 매끄러운 닫힌 경로
++    static func closedPath(through points: [CGPoint]) -> Path {
++        var path = Path()
++        let n = points.count
++        guard n > 2 else { return path }
++        path.move(to: points[0])
++        for i in 0..<n {
++            let p0 = points[(i - 1 + n) % n]
++            let p1 = points[i]
++            let p2 = points[(i + 1) % n]
++            let p3 = points[(i + 2) % n]
++            let control1 = CGPoint(x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6)
++            let control2 = CGPoint(x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6)
++            path.addCurve(to: p2, control1: control1, control2: control2)
++        }
++        path.closeSubpath()
++        return path
++    }
++}
++
++// MARK: - 변신하는 실루엣
++
++/// progress를 바꾸면 모양이 변하는 Shape (withAnimation으로 부드럽게 변신)
++struct MascotShape: Shape {
++    var progress: Double
++    var spinsWithMorph = false      // true면 모양이 바뀌는 만큼 시계 방향으로 회전 (한 모양당 90°)
++    
++    /// SwiftUI가 애니메이션 중간값을 여기에 넣어줘요 → 실루엣이 연속으로 변함
++    var animatableData: Double {
++        get { progress }
++        set { progress = newValue }
++    }
++    
++    func path(in rect: CGRect) -> Path {
++        let radii = MascotOutline.blended(progress)
++        let rotation = spinsWithMorph ? CGFloat(progress) * CGFloat.pi / 2 : 0
++        var points: [CGPoint] = []
++        points.reserveCapacity(radii.count)
++        for (index, radius) in radii.enumerated() {
++            let angle = MascotOutline.angle(at: index) + rotation
++            let x = rect.minX + rect.width * (0.5 + radius * cos(angle))
++            let y = rect.minY + rect.height * (0.5 + radius * sin(angle))
++            points.append(CGPoint(x: x, y: y))
++        }
++        return MascotPath.closedPath(through: points)
++    }
++}
+diff -ruN before/MascotView.swift after/MascotView.swift
+--- before/MascotView.swift	1969-12-31 17:00:00.000000000 -0700
++++ after/MascotView.swift	2026-11-27 21:03:54.743918056 -0600
+@@ -0,0 +1,220 @@
++import SwiftUI
++
++/// 마스코트 표정
++enum MascotExpression: String, CaseIterable {
++    case normal      // 세로 타원 눈
++    case blink       // 감은 눈
++    case happy       // 눈웃음 (⌒ ⌒)
++    case sleepy      // 졸린 눈 (◡ ◡)
++}
++
++/// 재사용 가능한 마스코트 캐릭터
++/// 크기·색·표정·모양(morph)·찌그러짐(squash)·점프(hop)·시선을 밖에서 정할 수 있어요.
++struct MascotView: View {
++    var size: CGFloat = 120
++    var morph: Double = 0                       // 0 네모, 1 동그라미, 2 꽃, 3 별
++    var spinsWithMorph = false                  // 변신하며 시계 방향으로 회전 (애니메이션 2)
++    var expression: MascotExpression = .normal
++    var eyeOpenness: CGFloat = 1                // 1 뜬 눈 ~ 0 감은 눈 (깜빡임용)
++    var lookOffset: CGSize = .zero              // 시선 (-1 ~ 1)
++    var squash: CGFloat = 0                     // + 납작, − 길쭉 (-1 ~ 1)
++    var hop: CGFloat = 0                        // 점프 높이 (0 바닥 ~ 1 가장 높이)
++    var tilt: Double = 0                        // 오른쪽 들어올리기 각도 (도)
++    var showsGroundShadow = true
++    var showsDropShadow = true                  // 몸 뒤로 퍼지는 그림자
++    var colors: [Color] = MascotView.defaultColors
++    
++    static let defaultColors = [Color(hex: 0x93DDFB), Color(hex: 0xA3A6F8), Color(hex: 0xB77CFC)]
++    static let shadowColor = Color(hex: 0x9B8CF2)
++    
++    private var bodyHeight: CGFloat { size * 0.9 }   // 원본 비율 (가로가 조금 더 김)
++    
++    var body: some View {
++        VStack(spacing: size * 0.08) {
++            ZStack {
++                MascotShape(progress: morph, spinsWithMorph: spinsWithMorph)
++                    .fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
++                    .shadow(color: Self.shadowColor.opacity(showsDropShadow ? 0.25 : 0), radius: size * 0.08, y: size * 0.04)
++                
++                MascotEyes(expression: expression, openness: eyeOpenness, width: size, height: bodyHeight)
++                    .offset(x: lookOffset.width * size * 0.05,
++                            y: lookOffset.height * size * 0.04)
++            }
++            .frame(width: size, height: bodyHeight)
++            .scaleEffect(x: 1 + squash * 0.12, y: 1 - squash * 0.12, anchor: .bottom)
++            .offset(y: -hop * size * 0.25)
++            .rotationEffect(.degrees(-tilt), anchor: .bottomLeading)
++            
++            if showsGroundShadow {
++                Ellipse()
++                    .fill(Self.shadowColor.opacity(0.18 * (1 - Double(hop) * 0.5)))
++                    .frame(width: size * 0.7, height: size * 0.07)
++                    .scaleEffect(x: (1 + squash * 0.15) * (1 - hop * 0.3))
++            }
++        }
++        .accessibilityHidden(true)
++    }
++}
++
++// MARK: - 눈
++
++struct MascotEyes: View {
++    let expression: MascotExpression
++    var openness: CGFloat = 1
++    let width: CGFloat
++    let height: CGFloat
++    var color: Color = Color(hex: 0x23202B)
++    
++    private var eyeWidth: CGFloat { width * 0.062 }
++    private var eyeHeight: CGFloat { height * 0.13 }
++    
++    var body: some View {
++        ZStack {
++            eye.offset(x: -width * 0.13)
++            eye.offset(x: width * 0.13)
++        }
++        .offset(y: -height * 0.02)       // 원본처럼 가운데보다 살짝 위
++        .foregroundStyle(color)
++        .animation(.easeInOut(duration: 0.15), value: expression)
++    }
++    
++    @ViewBuilder
++    private var eye: some View {
++        switch expression {
++        case .normal, .blink:
++            // 뜬 눈·감은 눈 = 같은 캡슐의 높이만 바뀜 (겹쳐 보이지 않음)
++            capsuleEye(open: expression == .blink ? 0 : openness)
++        case .happy:
++            ArcEye(curvesUp: true)
++                .stroke(style: StrokeStyle(lineWidth: eyeWidth * 0.7, lineCap: .round))
++                .frame(width: eyeWidth * 2.8, height: eyeWidth * 1.3)
++        case .sleepy:
++            ArcEye(curvesUp: false)
++                .stroke(style: StrokeStyle(lineWidth: eyeWidth * 0.7, lineCap: .round))
++                .frame(width: eyeWidth * 2.8, height: eyeWidth * 1.3)
++        }
++    }
++    
++    /// open: 1 다 뜸 ~ 0 감음 (감을수록 살짝 넓고 납작해짐)
++    private func capsuleEye(open: CGFloat) -> some View {
++        let clamped = min(max(open, 0), 1)
++        return Capsule()
++            .frame(width: eyeWidth * (1 + 0.5 * (1 - clamped)),
++                   height: max(eyeWidth * 0.55, eyeHeight * clamped))
++    }
++}
++
++/// 둥근 선 모양 눈 (위로 볼록 = 눈웃음, 아래로 볼록 = 졸림)
++struct ArcEye: Shape {
++    let curvesUp: Bool
++    
++    func path(in rect: CGRect) -> Path {
++        var path = Path()
++        if curvesUp {
++            path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
++            path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.maxY),
++                              control: CGPoint(x: rect.midX, y: rect.minY - rect.height))
++        } else {
++            path.move(to: CGPoint(x: rect.minX, y: rect.minY))
++            path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY),
++                              control: CGPoint(x: rect.midX, y: rect.maxY + rect.height))
++        }
++        return path
++    }
++}
++
++// MARK: - 반짝 표시 (참고 이미지의 짧은 선 세 개)
++
++struct MascotSparkles: View {
++    let size: CGFloat
++    var burst: CGFloat = 1                      // 0 숨김 → 1 톡 튀어나옴
++    var color: Color = Color(hex: 0x8F7CF0)
++    
++    var body: some View {
++        ZStack {
++            ForEach([-40.0, 0.0, 40.0], id: \.self) { degrees in
++                Capsule()
++                    .fill(color)
++                    .frame(width: size * 0.035, height: size * 0.11)
++                    .offset(y: -size * (0.06 + 0.05 * burst))
++                    .rotationEffect(.degrees(degrees))
++            }
++        }
++        .scaleEffect(0.4 + 0.6 * burst)
++        .accessibilityHidden(true)
++    }
++}
++
++// MARK: - 개발용 테스트 화면 (TODO: 출시 전 삭제)
++
++struct MascotTestView: View {
++    @State private var morph = 0.0
++    @State private var expression: MascotExpression = .normal
++    @State private var squash = 0.0
++    @State private var look = 0.0
++    
++    private var formName: String {
++        let names = ["Square", "Circle", "Flower", "Star"]
++        let index = Int(morph.rounded()) % names.count
++        return names[index]
++    }
++    
++    var body: some View {
++        Form {
++            Section {
++                MascotView(size: 180, morph: morph, expression: expression,
++                           lookOffset: CGSize(width: look, height: 0),
++                           squash: CGFloat(squash))
++                .frame(maxWidth: .infinity)
++                .padding(.vertical, 32)
++            }
++            
++            Section("Shape: \(formName)") {
++                Slider(value: $morph, in: 0...4)
++                Button("Morph to next shape") {
++                    withAnimation(.spring(duration: 0.9, bounce: 0.35)) {
++                        morph = morph.rounded() + 1
++                    }
++                }
++                Button("Reset to square") {
++                    morph = 0
++                }
++            }
++            
++            Section("Expression") {
++                Picker("Expression", selection: $expression) {
++                    ForEach(MascotExpression.allCases, id: \.self) { item in
++                        Text(item.rawValue.capitalized).tag(item)
++                    }
++                }
++                .pickerStyle(.segmented)
++            }
++            
++            Section("Squash & look") {
++                LabeledContent("Squash") { Slider(value: $squash, in: -1...1) }
++                LabeledContent("Look") { Slider(value: $look, in: -1...1) }
++            }
++        }
++        .navigationTitle("Mascot test")
++    }
++}
++
++/// Settings의 Developer 구역에 넣을 줄
++struct MascotTestLinkRow: View {
++    var body: some View {
++        NavigationLink {
++            MascotTestView()
++        } label: {
++            Text("Mascot test")
++        }
++    }
++}
++
++#Preview {
++    HStack(spacing: 24) {
++        MascotView(size: 100)
++        MascotView(size: 100, expression: .happy)
++        MascotView(size: 100, morph: 3)
++    }
++    .padding()
++}
+diff -ruN before/Models.swift after/Models.swift
+--- before/Models.swift	2026-11-27 21:03:54.739922177 -0600
++++ after/Models.swift	2026-11-27 21:03:54.745408274 -0600
+@@ -12,19 +12,22 @@
+     var nameOnSchedule: String    // 기본 이름 (Manage Workplaces의 Employee name): "Taylor"
+     var aliases: [String]         // Review에서 사용자가 고른 이름표들 (자동 매칭용, 화면에는 안 보임)
+     var color: WorkplaceColor     // 구분 색상
++    var closingMinutes: Int?      // 마감 시간 (자정부터 몇 분): 22시 = 1320. 모르면 nil
+     
+     init(
+         id: UUID = UUID(),
+         name: String,
+         nameOnSchedule: String = "",
+         aliases: [String] = [],
+-        color: WorkplaceColor = .blue
++        color: WorkplaceColor = .blue,
++        closingMinutes: Int? = nil
+     ) {
+         self.id = id
+         self.name = name
+         self.nameOnSchedule = nameOnSchedule
+         self.aliases = aliases
+         self.color = color
++        self.closingMinutes = closingMinutes
+     }
+ }
+ 
+diff -ruN before/OnboardingView.swift after/OnboardingView.swift
+--- before/OnboardingView.swift	1969-12-31 17:00:00.000000000 -0700
++++ after/OnboardingView.swift	2026-11-27 21:03:54.743558351 -0600
+@@ -0,0 +1,274 @@
++import SwiftUI
++
++/// 기기에 저장하는 값의 이름 (오타 방지용으로 한곳에 모음)
++enum AppStorageKey {
++    static let userName = "userName"
++    static let hasCompletedOnboarding = "hasCompletedOnboarding"
++    static let tutorialPending = "tutorialPending"      // Show me how를 눌렀는지 (튜토리얼에서 사용)
++}
++
++// MARK: - 온보딩 (2페이지)
++
++struct OnboardingView: View {
++    @AppStorage(AppStorageKey.userName) private var savedName = ""
++    @AppStorage(AppStorageKey.hasCompletedOnboarding) private var hasCompletedOnboarding = false
++    @AppStorage(AppStorageKey.tutorialPending) private var tutorialPending = false
++    
++    private enum Page { case name, welcome }
++    @State private var page: Page = .name
++    @State private var name = ""
++    @State private var didLoadName = false
++    
++    private var trimmedName: String {
++        name.trimmingCharacters(in: .whitespacesAndNewlines)
++    }
++    
++    var body: some View {
++        ZStack {
++            AppColor.background
++                .ignoresSafeArea()
++            
++            switch page {
++            case .name:
++                NamePage(name: $name, onContinue: goToWelcome)
++                    .transition(.move(edge: .leading).combined(with: .opacity))
++            case .welcome:
++                WelcomePage(
++                    name: trimmedName,
++                    onShowMe: { finish(withTutorial: true) },
++                    onSkip: { finish(withTutorial: false) },
++                    onBack: {
++                        withAnimation(.spring(duration: 0.5, bounce: 0.2)) { page = .name }
++                    }
++                )
++                .transition(.move(edge: .trailing).combined(with: .opacity))
++            }
++        }
++        .foregroundStyle(AppColor.primary)
++        .onAppear {
++            // 저장된 이름이 있으면 미리 채우기 (한 번만)
++            if !didLoadName {
++                name = savedName
++                didLoadName = true
++            }
++        }
++    }
++    
++    private func goToWelcome() {
++        guard !trimmedName.isEmpty else { return }
++        savedName = trimmedName
++        withAnimation(.spring(duration: 0.5, bounce: 0.2)) {
++            page = .welcome
++        }
++    }
++    
++    private func finish(withTutorial: Bool) {
++        tutorialPending = withTutorial
++        hasCompletedOnboarding = true
++    }
++}
++
++// MARK: - Page 1: Name
++
++private struct NamePage: View {
++    @Binding var name: String
++    let onContinue: () -> Void
++    
++    @FocusState private var isFocused: Bool
++    @State private var appeared = false
++    
++    private var trimmed: String {
++        name.trimmingCharacters(in: .whitespacesAndNewlines)
++    }
++    
++    /// 입력 중이면 입력창을 내려다보고, 글자가 늘수록 눈이 오른쪽으로
++    private var look: CGSize {
++        guard isFocused else { return .zero }
++        let progress = CGFloat(min(name.count, 14)) / 14
++        return CGSize(width: -0.6 + 1.2 * progress, height: 1)
++    }
++    
++    var body: some View {
++        VStack(spacing: 0) {
++            Spacer(minLength: 40)
++            
++            IdleMascot(size: 96, look: look)
++                .animation(.spring(duration: 0.35, bounce: 0.3), value: look)
++                .scaleEffect(appeared ? 1 : 0.6)
++                .opacity(appeared ? 1 : 0)
++            
++            Text("What should I call you?")
++                .font(AppFont.montserrat(26, .bold, relativeTo: .largeTitle))
++                .padding(.top, 32)
++            
++            Text("Let’s make things personal.")
++                .font(AppFont.montserrat(13, relativeTo: .subheadline))
++                .foregroundStyle(AppColor.primary.opacity(0.7))
++                .padding(.top, 6)
++            
++            TextField("Your name", text: $name)
++                .font(AppFont.montserrat(16, relativeTo: .body))
++                .textInputAutocapitalization(.words)
++                .autocorrectionDisabled()
++                .focused($isFocused)
++                .submitLabel(.continue)
++                .onSubmit {
++                    if !trimmed.isEmpty { onContinue() }
++                }
++                .padding(.horizontal, 16)
++                .frame(minHeight: 52)
++                .cardStyle()
++                .padding(.top, 28)
++            
++            Spacer()
++            Spacer()
++        }
++        .multilineTextAlignment(.center)
++        .padding(.horizontal, 24)
++        .frame(maxWidth: 480)
++        .safeAreaInset(edge: .bottom) {
++            PrimaryButton(title: "Continue", minHeight: 52) {
++                onContinue()
++            }
++            .disabled(trimmed.isEmpty)
++            .padding(.horizontal, 24)
++            .padding(.bottom, 8)
++            .frame(maxWidth: 480)
++        }
++        .onAppear {
++            withAnimation(.spring(duration: 0.6, bounce: 0.4).delay(0.1)) {
++                appeared = true
++            }
++        }
++    }
++}
++
++// MARK: - Page 2: Welcome
++
++private struct WelcomePage: View {
++    let name: String
++    let onShowMe: () -> Void
++    let onSkip: () -> Void
++    let onBack: () -> Void
++    
++    var body: some View {
++        VStack(spacing: 0) {
++            Spacer(minLength: 40)
++            
++            IdleMascot(size: 96, mood: .happy)
++            
++            Text("Nice to meet you, \(name)!")
++                .font(AppFont.montserrat(26, .bold, relativeTo: .largeTitle))
++                .padding(.top, 32)
++            
++            Text("Want me to show you around?")
++                .font(AppFont.montserrat(13, relativeTo: .subheadline))
++                .foregroundStyle(AppColor.primary.opacity(0.7))
++                .padding(.top, 6)
++            
++            Spacer()
++            Spacer()
++        }
++        .multilineTextAlignment(.center)
++        .padding(.horizontal, 24)
++        .frame(maxWidth: 480)
++        .safeAreaInset(edge: .bottom) {
++            VStack(spacing: 16) {
++                PrimaryButton(title: "Show me how", minHeight: 52, action: onShowMe)
++                
++                Button(action: onSkip) {
++                    Text("Skip for now")
++                        .font(AppFont.montserrat(13, .medium, relativeTo: .subheadline))
++                        .underline()
++                }
++                .buttonStyle(.plain)
++            }
++            .padding(.horizontal, 24)
++            .padding(.bottom, 8)
++            .frame(maxWidth: 480)
++        }
++        .overlay(alignment: .topLeading) {
++            Button(action: onBack) {
++                Image(systemName: "chevron.left")
++                    .font(.system(size: 17, weight: .semibold))
++                    .frame(width: 44, height: 44)
++            }
++            .buttonStyle(.plain)
++            .accessibilityLabel("Back")
++            .padding(.leading, 12)
++        }
++    }
++}
++
++// MARK: - 가만히 있는 마스코트 (숨쉬기·깜빡임·시선 / 기쁘게 통통)
++
++struct IdleMascot: View {
++    enum Mood { case calm, happy }
++    
++    var size: CGFloat = 96
++    var mood: Mood = .calm
++    var look: CGSize = .zero
++    
++    @Environment(\.accessibilityReduceMotion) private var reduceMotion
++    @State private var startDate = Date()
++    
++    var body: some View {
++        TimelineView(.animation) { context in
++            let time = context.date.timeIntervalSince(startDate)
++            let pose = reduceMotion ? IdleMotion.Pose() : IdleMotion.pose(at: time, mood: mood)
++            
++            MascotView(
++                size: size,
++                expression: mood == .happy ? .happy : .normal,
++                eyeOpenness: mood == .happy ? 1 : MascotMotion.eyeOpenness(at: time),
++                lookOffset: look,
++                squash: pose.squash,
++                hop: pose.hop
++            )
++        }
++    }
++}
++
++enum IdleMotion {
++    struct Pose {
++        var hop: CGFloat = 0
++        var squash: CGFloat = 0
++    }
++    
++    static func pose(at time: TimeInterval, mood: IdleMascot.Mood) -> Pose {
++        switch mood {
++        case .calm:
++            // 숨 쉬듯 아주 살짝 출렁
++            return Pose(hop: 0, squash: CGFloat(0.12 * sin(time * 2.2)))
++        case .happy:
++            // 통통 뛰기: 공중에서는 쭉 늘어나고, 착지하면 눌렸다가 출렁
++            let period = 1.1
++            let p = time.truncatingRemainder(dividingBy: period) / period
++            if p < 0.45 {
++                let s = sin(Double.pi * p / 0.45)
++                return Pose(hop: CGFloat(0.35 * s), squash: CGFloat(-0.35 * s))
++            } else {
++                let u = (p - 0.45) / 0.55
++                return Pose(hop: 0, squash: CGFloat(0.5 * exp(-4 * u) * sin(3 * Double.pi * u)))
++            }
++        }
++    }
++}
++
++// MARK: - 개발용: 온보딩 다시 보기 (TODO: 출시 전 삭제)
++
++struct OnboardingResetRow: View {
++    @AppStorage(AppStorageKey.hasCompletedOnboarding) private var hasCompletedOnboarding = true
++    @AppStorage(AppStorageKey.userName) private var userName = ""
++    
++    var body: some View {
++        Button("Show onboarding again") {
++            if userName.isEmpty { userName = "Jiwoo" }   // 키보드 버그 대비: 이름 미리 채우기
++            hasCompletedOnboarding = false
++        }
++    }
++}
++
++#Preview {
++    OnboardingView()
++}
+diff -ruN before/PersistenceModels.swift after/PersistenceModels.swift
+--- before/PersistenceModels.swift	2026-11-27 21:03:54.739795576 -0600
++++ after/PersistenceModels.swift	2026-11-27 21:03:54.745257684 -0600
+@@ -11,6 +11,7 @@
+     var colorName: String      // WorkplaceColor의 이름 ("orange")
+     var isArchived: Bool       // 삭제한 직장: 목록에선 숨기고, 기존 근무를 위해 보관
+     var createdAt: Date        // 목록 순서용
++    var closingMinutes: Int?   // 마감 시간 (자정부터 몇 분). 모르면 nil
+     
+     init(from workplace: Workplace) {
+         self.id = workplace.id
+@@ -20,6 +21,7 @@
+         self.colorName = workplace.color.rawValue
+         self.isArchived = false
+         self.createdAt = .now
++        self.closingMinutes = workplace.closingMinutes
+     }
+     
+     func update(from workplace: Workplace) {
+@@ -27,6 +29,7 @@
+         nameOnSchedule = workplace.nameOnSchedule
+         aliases = workplace.aliases
+         colorName = workplace.color.rawValue
++        closingMinutes = workplace.closingMinutes
+     }
+ }
+ 
+@@ -54,7 +57,8 @@
+             name: record.name,
+             nameOnSchedule: record.nameOnSchedule,
+             aliases: record.aliases,
+-            color: WorkplaceColor(rawValue: record.colorName) ?? .blue
++            color: WorkplaceColor(rawValue: record.colorName) ?? .blue,
++            closingMinutes: record.closingMinutes
+         )
+     }
+ }
+diff -ruN before/ReviewScheduleView.swift after/ReviewScheduleView.swift
+--- before/ReviewScheduleView.swift	2026-11-27 21:03:54.739316090 -0600
++++ after/ReviewScheduleView.swift	2026-11-27 21:03:54.744818564 -0600
+@@ -6,6 +6,7 @@
+     let onFinish: () -> Void
+     
+     @EnvironmentObject private var store: ShiftStore
++    @EnvironmentObject private var tutorial: TutorialController
+     @State private var result: ExtractionResult
+     @State private var selectedWorkplaceID: UUID?
+     
+@@ -20,9 +21,14 @@
+     @State private var hasEdits = false               // 근무나 주를 손으로 고쳤는지
+     @State private var pendingChange: PendingChange?  // 확인창에서 기다리는 변경
+     
++    // 마감(CL) 근무
++    @State private var closingFilledIDs: Set<ExtractedShift.ID> = []   // 마감 시간으로 자동 채운 근무
++    @State private var isEditingClosingTime = false
++    
+     @State private var isShowingFullImage = false
+     @State private var editorTarget: ShiftEditorTarget?
+     @State private var isShowingNewWorkplace = false
++    @State private var isEditingWorkplace = false
+     @State private var isShowingWeekPicker = false
+     
+     @Environment(\.dismiss) private var dismiss
+@@ -51,6 +57,11 @@
+         store.workplaces.first { $0.id == selectedWorkplaceID }
+     }
+     
++    /// 직장 추가·수정 창이 떠 있는지
++    private var isShowingWorkplaceDialog: Bool {
++        isShowingNewWorkplace || isEditingWorkplace
++    }
++    
+     /// 직장 드롭다운용: 바꾸기 전에 확인을 거침
+     private var workplaceSelection: Binding<UUID?> {
+         Binding(
+@@ -79,12 +90,17 @@
+         return name
+     }
+     
++    /// 끝나는 시각이 아직 비어 있는 CL 근무 수
++    private var openCloseCount: Int {
++        result.shifts.filter { $0.end == nil }.count
++    }
++    
+     private var saveBlocker: String? {
+         if selectedWorkplace == nil { return "Choose a workplace to continue." }
+         if requiresNameChoice { return "Tap your name on the schedule to continue." }
+         if result.shifts.isEmpty { return "Add at least one shift." }
+-        if result.shifts.contains(where: { $0.end == nil }) {
+-            return "Set an end time for shifts marked “Close”."
++        if openCloseCount > 0 {
++            return "Set a closing time for shifts marked “Close”."
+         }
+         return nil
+     }
+@@ -123,33 +139,57 @@
+                     .foregroundStyle(AppColor.primary.opacity(0.7))
+                     .padding(.top, 28)
+                 
+-                // 1. Workplace
+-                FieldLabel("WORKPLACE")
+-                    .padding(.top, 12)
+-                WorkplacePicker(
+-                    workplaces: store.workplaces,
+-                    selectedID: workplaceSelection,
+-                    onNewWorkplace: {
+-                        withAnimation { isShowingNewWorkplace = true }
++                // 1. Workplace (튜토리얼에서 따로 강조)
++                VStack(alignment: .leading, spacing: 0) {
++                    FieldLabel("WORKPLACE")
++                    WorkplacePicker(
++                        workplaces: store.workplaces,
++                        selectedID: workplaceSelection,
++                        onNewWorkplace: {
++                            withAnimation { isShowingNewWorkplace = true }
++                        }
++                    )
++                    .padding(.top, 8)
++                    
++                    // 잘못 만들었을 때 바로 고치기 + Settings 안내
++                    HStack(alignment: .firstTextBaseline) {
++                        Text("Manage workplaces anytime in Settings.")
++                            .font(AppFont.montserrat(11, relativeTo: .caption))
++                            .foregroundStyle(AppColor.primary.opacity(0.6))
++                        Spacer()
++                        if selectedWorkplace != nil {
++                            Button("Edit") {
++                                withAnimation { isEditingWorkplace = true }
++                            }
++                            .font(AppFont.montserrat(12, .medium, relativeTo: .footnote))
++                            .underline()
++                            .buttonStyle(.plain)
++                            .accessibilityLabel("Edit workplace")
++                        }
+                     }
+-                )
+-                .padding(.top, 8)
++                    .padding(.top, 8)
++                }
++                .tutorialTarget(.reviewWorkplace)
++                .padding(.top, 12)
+                 
+-                // 2. We'll look for
+-                FieldLabel("We'll look for")
+-                    .padding(.top, 24)
+-                NameMatchSection(
+-                    result: result,
+-                    requiresChoice: requiresNameChoice,
+-                    preferredName: preferredName,
+-                    isPicking: $isPickingName,
+-                    onPick: { label in requestChange(.name(label)) },
+-                    onTypeName: {
+-                        typedName = ""
+-                        isTypingName = true
+-                    }
+-                )
+-                .padding(.top, 8)
++                // 2. We'll look for (튜토리얼에서 따로 강조)
++                VStack(alignment: .leading, spacing: 0) {
++                    FieldLabel("We'll look for")
++                    NameMatchSection(
++                        result: result,
++                        requiresChoice: requiresNameChoice,
++                        preferredName: preferredName,
++                        isPicking: $isPickingName,
++                        onPick: { label in requestChange(.name(label)) },
++                        onTypeName: {
++                            typedName = ""
++                            isTypingName = true
++                        }
++                    )
++                    .padding(.top, 8)
++                }
++                .tutorialTarget(.reviewName)
++                .padding(.top, 24)
+                 
+                 // 3. Schedule Week
+                 if let range = scheduleRange {
+@@ -169,20 +209,26 @@
+                 }
+                 
+                 // 4. Extracted shifts (이름을 고르기 전에는 숨김)
+-                if requiresNameChoice {
+-                    Text("Extracted shifts")
+-                        .font(AppFont.montserrat(20, .bold, relativeTo: .title3))
++                VStack(alignment: .leading, spacing: 0) {
++                    if requiresNameChoice {
++                        Text("Extracted shifts")
++                            .font(AppFont.montserrat(20, .bold, relativeTo: .title3))
++                        ReviewNote(text: "Choose your name above to see your shifts.")
++                            .padding(.top, 8)
++                    } else {
++                        ScanQualityNotes(image: image, result: result)
++                        closingTimeSection
++                        
++                        ExtractedShiftsSection(
++                            shifts: result.shifts,
++                            onEdit: { shift in editorTarget = .existing(shift) },
++                            onAdd: { editorTarget = .new(makeNewShift()) }
++                        )
+                         .padding(.top, 28)
+-                    ReviewNote(text: "Choose your name above to see your shifts.")
+-                        .padding(.top, 8)
+-                } else {
+-                    ExtractedShiftsSection(
+-                        shifts: result.shifts,
+-                        onEdit: { shift in editorTarget = .existing(shift) },
+-                        onAdd: { editorTarget = .new(makeNewShift()) }
+-                    )
+-                    .padding(.top, 28)
++                    }
+                 }
++                .tutorialTarget(.reviewShifts)
++                .padding(.top, requiresNameChoice ? 28 : 0)
+             }
+             .padding(.horizontal, 24)
+             .padding(.bottom, 24)
+@@ -199,6 +245,7 @@
+                     saveShifts()
+                 }
+                 .disabled(saveBlocker != nil)
++                .tutorialTarget(.reviewSaveButton)
+             }
+             .padding(.horizontal, 24)
+             .padding(.vertical, 8)
+@@ -207,81 +254,141 @@
+         .foregroundStyle(AppColor.primary)
+         .background(AppColor.background)
+         .navigationBarTitleDisplayMode(.inline)
+-        .navigationBarBackButtonHidden(isShowingNewWorkplace)
++        .navigationBarBackButtonHidden(isShowingWorkplaceDialog)
+         .toolbar(.hidden, for: .tabBar)
+-        .overlay {
+-            if isShowingNewWorkplace {
+-                WorkplaceDialog(
+-                    title: "Add New Workplace",
+-                    saveTitle: "Save Workplace",
+-                    initialNameOnSchedule: confirmedLabel ?? result.matchedName ?? "",
+-                    onSave: { name, nameOnSchedule in
+-                        let workplace = store.addWorkplace(name: name, nameOnSchedule: nameOnSchedule)
+-                        withAnimation { isShowingNewWorkplace = false }
+-                        requestChange(.workplace(workplace.id))
+-                    },
+-                    onClose: {
+-                        withAnimation { isShowingNewWorkplace = false }
+-                    }
+-                )
+-                .transition(.opacity)
++        // 튜토리얼 말풍선 (직장 추가·수정 창이 떠 있으면 숨김)
++        .tutorialOverlay(tutorial, showing: [.reviewWorkplace, .reviewName, .reviewShifts, .reviewSave],
++                         isHidden: isShowingWorkplaceDialog) { step in
++            switch step {
++            case .reviewWorkplace: tutorial.advance(from: .reviewWorkplace, to: .reviewName)
++            case .reviewName:      tutorial.advance(from: .reviewName, to: .reviewShifts)
++            case .reviewShifts:    tutorial.advance(from: .reviewShifts, to: .reviewSave)
++            default: break
+             }
+         }
+-        .onAppear {
+-            if selectedWorkplaceID == nil, store.workplaces.count == 1 {
+-                selectedWorkplaceID = store.workplaces[0].id
+-            }
+-        }
+-        .task(id: RecognitionKey(workplaceID: selectedWorkplaceID, label: confirmedLabel)) {
+-            runRecognition()
+-        }
++                         .overlay {
++                             if isShowingNewWorkplace {
++                                 WorkplaceDialog(
++                                    title: "Add New Workplace",
++                                    saveTitle: "Save Workplace",
++                                    initialNameOnSchedule: confirmedLabel ?? result.matchedName ?? "",
++                                    onSave: { name, nameOnSchedule, closingMinutes in
++                                        var workplace = store.addWorkplace(name: name, nameOnSchedule: nameOnSchedule)
++                                        if closingMinutes != nil {
++                                            workplace.closingMinutes = closingMinutes
++                                            store.updateWorkplace(workplace)
++                                        }
++                                        withAnimation { isShowingNewWorkplace = false }
++                                        requestChange(.workplace(workplace.id))
++                                    },
++                                    onClose: {
++                                        withAnimation { isShowingNewWorkplace = false }
++                                    }
++                                 )
++                                 .transition(.opacity)
++                             } else if isEditingWorkplace, let workplace = selectedWorkplace {
++                                 WorkplaceDialog(
++                                    title: "Edit Workplace",
++                                    saveTitle: "Save Changes",
++                                    initialName: workplace.name,
++                                    initialNameOnSchedule: workplace.nameOnSchedule,
++                                    initialClosingMinutes: workplace.closingMinutes,
++                                    onSave: { name, nameOnSchedule, closingMinutes in
++                                        editWorkplace(workplace.id, name: name, nameOnSchedule: nameOnSchedule,
++                                                      closingMinutes: closingMinutes)
++                                    },
++                                    onClose: {
++                                        withAnimation { isEditingWorkplace = false }
++                                    }
++                                 )
++                                 .transition(.opacity)
++                             }
++                         }
++                         .onAppear {
++                             if selectedWorkplaceID == nil, store.workplaces.count == 1 {
++                                 selectedWorkplaceID = store.workplaces[0].id
++                             }
++                         }
++                         .task(id: RecognitionKey(workplaceID: selectedWorkplaceID, label: confirmedLabel)) {
++                             runRecognition()
++                         }
+         // 고친 내용이 사라지기 전 확인
+-        .alert(
+-            "Discard your changes?",
+-            isPresented: Binding(
+-                get: { pendingChange != nil },
+-                set: { if !$0 { pendingChange = nil } }
+-            ),
+-            presenting: pendingChange
+-        ) { change in
+-            Button("Cancel", role: .cancel) { }
+-            Button("Continue", role: .destructive) { apply(change) }
+-        } message: { _ in
+-            Text("Changing the workplace or name will find your shifts again. Changes you've made to the shifts or schedule week will be lost.")
+-        }
+-        .alert("Your name on the schedule", isPresented: $isTypingName) {
+-            TextField("e.g. Park, J.", text: $typedName)
+-            Button("Search") {
+-                let name = typedName.trimmingCharacters(in: .whitespacesAndNewlines)
+-                if !name.isEmpty { requestChange(.name(name)) }
+-            }
+-            Button("Cancel", role: .cancel) { }
+-        } message: {
+-            Text("Type your name the way it's written on this schedule.")
+-        }
+-        .fullScreenCover(isPresented: $isShowingFullImage) {
+-            FullImageView(image: image)
+-        }
+-        .sheet(item: $editorTarget) { target in
+-            switch target {
+-            case .existing(let shift):
+-                ExtractedShiftEditor(
+-                    shift: shift,
+-                    isNew: false,
+-                    onSave: { updated in save(updated) },
+-                    onDelete: { delete(shift) }
+-                )
+-            case .new(let shift):
+-                ExtractedShiftEditor(
+-                    shift: shift,
+-                    isNew: true,
+-                    onSave: { added in save(added) }
++                         .alert(
++                            "Discard your changes?",
++                            isPresented: Binding(
++                                get: { pendingChange != nil },
++                                set: { if !$0 { pendingChange = nil } }
++                            ),
++                            presenting: pendingChange
++                         ) { change in
++                             Button("Cancel", role: .cancel) { }
++                             Button("Continue", role: .destructive) { apply(change) }
++                         } message: { _ in
++                             Text("Changing the workplace or name will find your shifts again. Changes you've made to the shifts or schedule week will be lost.")
++                         }
++                         .alert("Your name on the schedule", isPresented: $isTypingName) {
++                             TextField("e.g. Park, J.", text: $typedName)
++                             Button("Search") {
++                                 let name = typedName.trimmingCharacters(in: .whitespacesAndNewlines)
++                                 if !name.isEmpty { requestChange(.name(name)) }
++                             }
++                             Button("Cancel", role: .cancel) { }
++                         } message: {
++                             Text("Type your name the way it's written on this schedule.")
++                         }
++                         .fullScreenCover(isPresented: $isShowingFullImage) {
++                             FullImageView(image: image)
++                         }
++                         .sheet(item: $editorTarget) { target in
++                             switch target {
++                             case .existing(let shift):
++                                 ExtractedShiftEditor(
++                                    shift: shift,
++                                    isNew: false,
++                                    onSave: { updated in save(updated) },
++                                    onDelete: { delete(shift) }
++                                 )
++                             case .new(let shift):
++                                 ExtractedShiftEditor(
++                                    shift: shift,
++                                    isNew: true,
++                                    onSave: { added in save(added) }
++                                 )
++                             }
++                         }
++                         .sheet(isPresented: $isShowingWeekPicker) {
++                             ScheduleWeekSheet(weekStart: scheduleRange?.start ?? .now) { date in
++                                 moveSchedule(toWeekContaining: date)
++                             }
++                         }
++    }
++    
++    // MARK: - 마감 시간 카드 / 안내
++    
++    @ViewBuilder
++    private var closingTimeSection: some View {
++        if let workplace = selectedWorkplace {
++            if openCloseCount > 0 || isEditingClosingTime {
++                // 마감 시간을 모르거나, Change를 눌렀을 때
++                ClosingTimeCard(
++                    workplaceName: workplace.name,
++                    closeShiftCount: openCloseCount + closingFilledIDs.count,
++                    initialMinutes: workplace.closingMinutes,
++                    onSave: { minutes in setClosingTime(minutes) }
+                 )
+-            }
+-        }
+-        .sheet(isPresented: $isShowingWeekPicker) {
+-            ScheduleWeekSheet(weekStart: scheduleRange?.start ?? .now) { date in
+-                moveSchedule(toWeekContaining: date)
++                .padding(.top, 28)
++            } else if !closingFilledIDs.isEmpty, let minutes = workplace.closingMinutes {
++                // 저장된 마감 시간으로 자동 채웠을 때
++                VStack(alignment: .leading, spacing: 6) {
++                    ReviewNote(text: "Shifts marked “Close” end at \(ClosingTime.text(minutes)), \(workplace.name)'s closing time.")
++                    Button("Change closing time") {
++                        isEditingClosingTime = true
++                    }
++                    .font(AppFont.montserrat(12, .medium, relativeTo: .footnote))
++                    .underline()
++                    .buttonStyle(.plain)
++                }
++                .padding(.top, 28)
+             }
+         }
+     }
+@@ -306,11 +413,31 @@
+         }
+     }
+     
++    /// Edit Workplace 창에서 저장: 직장 정보 고치기 (마감 시간이 바뀌면 CL 근무도 다시 채움)
++    private func editWorkplace(_ id: UUID, name: String, nameOnSchedule: String, closingMinutes: Int?) {
++        guard var latest = store.workplaces.first(where: { $0.id == id }) else { return }
++        let closingChanged = latest.closingMinutes != closingMinutes
++        latest.name = name
++        latest.nameOnSchedule = nameOnSchedule
++        latest.closingMinutes = closingMinutes
++        store.updateWorkplace(latest)
++        withAnimation { isEditingWorkplace = false }
++        
++        if closingChanged, let closingMinutes {
++            setClosingTime(closingMinutes)
++        }
++    }
++    
+     // MARK: - 이름으로 찾기
+     
+     private func runRecognition() {
+         hasEdits = false   // 결과를 새로 만들면 고친 내용은 초기화됨
+-        
++        isEditingClosingTime = false
++        matchShifts()
++        applyClosingTime()
++    }
++    
++    private func matchShifts() {
+         // 1) 사용자가 직접 고른 이름
+         if let confirmedLabel {
+             result = schedule.extract([confirmedLabel])
+@@ -346,6 +473,32 @@
+         requiresNameChoice = !result.nameCandidates.isEmpty
+     }
+     
++    // MARK: - 마감 시간
++    
++    /// 저장된 마감 시간으로 CL 근무의 끝나는 시각 채우기
++    private func applyClosingTime() {
++        closingFilledIDs = []
++        guard let workplace = selectedWorkplace, workplace.closingMinutes != nil else { return }
++        for index in result.shifts.indices where result.shifts[index].end == nil {
++            result.shifts[index].end = workplace.closingDate(after: result.shifts[index].start)
++            closingFilledIDs.insert(result.shifts[index].id)
++        }
++    }
++    
++    /// 카드에서 마감 시간을 고름 → 직장에 저장 + CL 근무 모두 채우기
++    private func setClosingTime(_ minutes: Int) {
++        guard var workplace = selectedWorkplace else { return }
++        workplace.closingMinutes = minutes
++        store.updateWorkplace(workplace)
++        isEditingClosingTime = false
++        
++        for index in result.shifts.indices
++        where result.shifts[index].end == nil || closingFilledIDs.contains(result.shifts[index].id) {
++            result.shifts[index].end = workplace.closingDate(after: result.shifts[index].start)
++            closingFilledIDs.insert(result.shifts[index].id)
++        }
++    }
++    
+     // MARK: - 목록 변경
+     
+     private func save(_ shift: ExtractedShift) {
+@@ -355,11 +508,13 @@
+             result.shifts.append(shift)
+         }
+         result.shifts.sort { $0.start < $1.start }
++        closingFilledIDs.remove(shift.id)   // 직접 고친 근무는 마감 시간으로 덮어쓰지 않음
+         hasEdits = true
+     }
+     
+     private func delete(_ shift: ExtractedShift) {
+         result.shifts.removeAll { $0.id == shift.id }
++        closingFilledIDs.remove(shift.id)
+         hasEdits = true
+     }
+     
+@@ -411,6 +566,7 @@
+             return Shift(workplace: workplace, start: extracted.start, end: end)
+         }
+         store.addShifts(newShifts)
++        tutorial.advance(fromAny: [.reviewWorkplace, .reviewName, .reviewShifts, .reviewSave], to: .shiftsAdded)
+         onFinish()
+     }
+ }
+@@ -420,6 +576,7 @@
+         ReviewScheduleView(image: UIImage(systemName: "tablecells")!, schedule: SampleSchedules.cafeA)
+     }
+     .environmentObject(ShiftStore.sample)
++    .environmentObject(TutorialController())
+ }
+ 
+ #Preview("Restaurant B — overnight") {
+@@ -427,4 +584,5 @@
+         ReviewScheduleView(image: UIImage(systemName: "tablecells")!, schedule: SampleSchedules.restaurantB)
+     }
+     .environmentObject(ShiftStore.sample)
++    .environmentObject(TutorialController())
+ }
+diff -ruN before/ScanQualityNotes.swift after/ScanQualityNotes.swift
+--- before/ScanQualityNotes.swift	1969-12-31 17:00:00.000000000 -0700
++++ after/ScanQualityNotes.swift	2026-11-27 21:03:54.745040134 -0600
+@@ -0,0 +1,43 @@
++import SwiftUI
++
++/// Review에서 사진 품질·못 읽은 칸 안내
++struct ScanQualityNotes: View {
++    let image: UIImage
++    let result: ExtractionResult
++    
++    /// 짧은 쪽이 이보다 작으면 저해상도 안내
++    private static let minimumShortSide: CGFloat = 600
++    
++    private var isLowResolution: Bool {
++        let width = image.size.width * image.scale
++        let height = image.size.height * image.scale
++        return min(width, height) < Self.minimumShortSide
++    }
++    
++    /// "Tue, Nov 25 (“6g”)"
++    private var unreadableText: String {
++        result.unreadableCells
++            .sorted { $0.date < $1.date }
++            .map { cell in
++                let day = cell.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
++                return "\(day) (“\(cell.rawText)”)"
++            }
++            .joined(separator: ", ")
++    }
++    
++    var body: some View {
++        let count = result.unreadableCells.count
++        
++        if isLowResolution || count > 0 {
++            VStack(alignment: .leading, spacing: 8) {
++                if count > 0 {
++                    ReviewNote(text: "Couldn't read \(count) \(count == 1 ? "day" : "days"): \(unreadableText). Add it yourself if you worked that day.")
++                }
++                if isLowResolution {
++                    ReviewNote(text: "This photo is low resolution, so some shifts may be missed. A full-size screenshot works best.")
++                }
++            }
++            .padding(.top, 28)
++        }
++    }
++}
+diff -ruN before/ScheduleLoadingView.swift after/ScheduleLoadingView.swift
+--- before/ScheduleLoadingView.swift	1969-12-31 17:00:00.000000000 -0700
++++ after/ScheduleLoadingView.swift	2026-11-27 21:03:54.745396554 -0600
+@@ -0,0 +1,55 @@
++import SwiftUI
++
++/// 근무표를 분석하는 동안 화면 위에 띄우는 카드 (캐릭터 + 문구)
++/// isFinished가 true가 되면 캐릭터가 눈웃음 완료 모션을 보여줘요.
++struct ScheduleLoadingView: View {
++    var isFinished = false
++    var title = "Finding your shifts…"
++    var message = "Looking through your work schedule."
++    
++    /// 캐릭터가 자연스럽게 어울리도록 카드에 깔리는 아주 연한 보라
++    static let cardColor = Color(hex: 0xF6F4FF)
++    
++    var body: some View {
++        ZStack {
++            // 뒤 화면을 살짝 어둡게 + 터치 막기
++            Color.black.opacity(0.25)
++                .ignoresSafeArea()
++            
++            VStack(spacing: 0) {
++                AnimatedMascot(size: 100, style: .bouncy, isFinished: isFinished, cycleDuration: 3.6, showsDropShadow: false)
++                
++                Text(title)
++                    .font(AppFont.montserrat(17, .semibold, relativeTo: .headline))
++                    .padding(.top, 20)
++                
++                Text(message)
++                    .font(AppFont.montserrat(13, relativeTo: .subheadline))
++                    .foregroundStyle(AppColor.primary.opacity(0.7))
++                    .padding(.top, 6)
++            }
++            .multilineTextAlignment(.center)
++            .foregroundStyle(AppColor.primary)
++            .padding(.top, 32)
++            .padding(.bottom, 28)
++            .padding(.horizontal, 28)
++            .frame(maxWidth: 300)
++            .background(Self.cardColor, in: RoundedRectangle(cornerRadius: 10))
++            .overlay(
++                RoundedRectangle(cornerRadius: 10)
++                    .stroke(AppColor.muted, lineWidth: 1)
++            )
++            .padding(24)
++        }
++        .accessibilityElement(children: .combine)
++        .accessibilityAddTraits(.isModal)
++    }
++}
++
++#Preview("Loading") {
++    ScheduleLoadingView()
++}
++
++#Preview("Finished") {
++    ScheduleLoadingView(isFinished: true)
++}
+diff -ruN before/SettingsView.swift after/SettingsView.swift
+--- before/SettingsView.swift	2026-11-27 21:03:54.739567726 -0600
++++ after/SettingsView.swift	2026-11-27 21:03:54.745056518 -0600
+@@ -8,6 +8,7 @@
+ 
+ struct SettingsView: View {
+     @EnvironmentObject private var store: ShiftStore
++    @EnvironmentObject private var tutorial: TutorialController
+     @State private var isConfirmingErase = false
+     
+     var body: some View {
+@@ -30,6 +31,7 @@
+                             subtitle: "\(TextFormat.longDuration(minutes: settings.wakeUpMinutesBefore)) before each shift",
+                             route: .wakeUpAlarm
+                         )
++                        .tutorialTarget(.wakeUpAlarmRow)
+                         Divider().padding(.horizontal, 16)
+                         SettingsRow(
+                             title: "Alarm sound",
+@@ -44,6 +46,7 @@
+                             subtitle: "Reminder times and notification permissions",
+                             route: .shiftReminders
+                         )
++                        .tutorialTarget(.remindersRow)
+                     }
+                     
+                     SettingsSection(title: "Workplaces") {
+@@ -80,8 +83,18 @@
+                             isConfirmingErase = true
+                         }
+                         Divider().padding(.horizontal, 16)
++                        DeveloperRow(
++                            title: "Restart tutorial",
++                            subtitle: "Current step: \(tutorial.step?.rawValue ?? "none") · pending: \(UserDefaults.standard.bool(forKey: AppStorageKey.tutorialPending))"
++                        ) {
++                            tutorial.restart()
++                        }
++                        Divider().padding(.horizontal, 16)
+                         OCRTestLinkRow()
+                         ReminderTestLinkRow()
++                        MascotTestLinkRow()
++                        MascotAnimationTestLinkRow()
++                        OnboardingResetRow()
+                     }
+                 }
+                 .foregroundStyle(AppColor.primary)
+@@ -90,6 +103,23 @@
+             }
+             .background(AppColor.background)
+             .toolbar(.hidden, for: .navigationBar)
++            // 튜토리얼 말풍선
++            .tutorialOverlay(tutorial, showing: [.wakeUpAlarm, .reminders, .finished]) { step in
++                switch step {
++                case .wakeUpAlarm:
++                    tutorial.advance(from: .wakeUpAlarm, to: .reminders)
++                case .reminders:
++                    Task {
++                        await NotificationPermission.request()
++                        store.refreshReminders()
++                        tutorial.advance(from: .reminders, to: .finished)
++                    }
++                case .finished:
++                    tutorial.end()
++                default:
++                    break
++                }
++            }
+             .navigationDestination(for: SettingsRoute.self) { route in
+                 switch route {
+                 case .about:
+@@ -200,4 +230,5 @@
+ #Preview {
+     SettingsView()
+         .environmentObject(ShiftStore.sample)
++        .environmentObject(TutorialController())
+ }
+diff -ruN before/ShiftFormView.swift after/ShiftFormView.swift
+--- before/ShiftFormView.swift	2026-11-27 21:03:54.739218166 -0600
++++ after/ShiftFormView.swift	2026-11-27 21:03:54.744706412 -0600
+@@ -11,6 +11,7 @@
+     var onFinish: (() -> Void)? = nil   // 있으면 저장 후 이 동작 (없으면 이전 화면으로)
+     
+     @EnvironmentObject private var store: ShiftStore
++    @EnvironmentObject private var tutorial: TutorialController
+     @Environment(\.dismiss) private var dismiss
+     
+     @State private var workplaceID: UUID?
+@@ -19,6 +20,7 @@
+     @State private var endTime: Date
+     
+     @State private var isShowingNewWorkplace = false
++    @State private var isEditingWorkplace = false
+     @State private var isConfirmingDelete = false
+     @State private var isShowingDuplicateAlert = false
+     
+@@ -64,6 +66,15 @@
+         workplaceOptions.first { $0.id == workplaceID }
+     }
+     
++    /// 수정할 수 있는 직장 (삭제된 직장은 수정 불가)
++    private var editableWorkplace: Workplace? {
++        store.workplaces.first { $0.id == workplaceID }
++    }
++    
++    private var isShowingWorkplaceDialog: Bool {
++        isShowingNewWorkplace || isEditingWorkplace
++    }
++    
+     private var startDate: Date {
+         CalendarMath.combine(day: day, time: startTime)
+     }
+@@ -101,7 +112,7 @@
+     
+     var body: some View {
+         Form {
+-            Section("Workplace") {
++            Section {
+                 Picker("Workplace", selection: $workplaceID) {
+                     if workplaceID == nil {
+                         Text("Choose").tag(UUID?.none)
+@@ -110,9 +121,18 @@
+                         Text(workplace.name).tag(Optional(workplace.id))
+                     }
+                 }
++                if let editableWorkplace {
++                    Button("Edit \(editableWorkplace.name)") {
++                        withAnimation { isEditingWorkplace = true }
++                    }
++                }
+                 Button("+ New workplace") {
+                     withAnimation { isShowingNewWorkplace = true }
+                 }
++            } header: {
++                Text("Workplace")
++            } footer: {
++                Text("You can also manage workplaces in Settings › Manage workplaces.")
+             }
+             
+             Section {
+@@ -152,7 +172,7 @@
+         }
+         .navigationTitle(isEditing ? "Edit Shift" : "Add Shift")
+         .navigationBarTitleDisplayMode(.inline)
+-        .navigationBarBackButtonHidden(isShowingNewWorkplace)
++        .navigationBarBackButtonHidden(isShowingWorkplaceDialog)
+         .toolbar(.hidden, for: .tabBar)
+         .toolbar {
+             ToolbarItem(placement: .confirmationAction) {
+@@ -165,13 +185,19 @@
+                 workplaceID = store.workplaces[0].id
+             }
+         }
++        // 튜토리얼 말풍선 (직접 입력 단계)
++        .tutorialOverlay(tutorial, showing: [.manualEntry], isHidden: isShowingWorkplaceDialog)
+         .overlay {
+             if isShowingNewWorkplace {
+                 WorkplaceDialog(
+                     title: "Add New Workplace",
+                     saveTitle: "Save Workplace",
+-                    onSave: { name, nameOnSchedule in
+-                        let workplace = store.addWorkplace(name: name, nameOnSchedule: nameOnSchedule)
++                    onSave: { name, nameOnSchedule, closingMinutes in
++                        var workplace = store.addWorkplace(name: name, nameOnSchedule: nameOnSchedule)
++                        if closingMinutes != nil {
++                            workplace.closingMinutes = closingMinutes
++                            store.updateWorkplace(workplace)
++                        }
+                         workplaceID = workplace.id
+                         withAnimation { isShowingNewWorkplace = false }
+                     },
+@@ -180,14 +206,34 @@
+                     }
+                 )
+                 .transition(.opacity)
++            } else if isEditingWorkplace, let workplace = editableWorkplace {
++                WorkplaceDialog(
++                    title: "Edit Workplace",
++                    saveTitle: "Save Changes",
++                    initialName: workplace.name,
++                    initialNameOnSchedule: workplace.nameOnSchedule,
++                    initialClosingMinutes: workplace.closingMinutes,
++                    onSave: { name, nameOnSchedule, closingMinutes in
++                        if var latest = store.workplaces.first(where: { $0.id == workplace.id }) {
++                            latest.name = name
++                            latest.nameOnSchedule = nameOnSchedule
++                            latest.closingMinutes = closingMinutes
++                            store.updateWorkplace(latest)
++                        }
++                        withAnimation { isEditingWorkplace = false }
++                    },
++                    onClose: {
++                        withAnimation { isEditingWorkplace = false }
++                    }
++                )
++                .transition(.opacity)
+             }
+         }
+         .alert("Delete this shift?", isPresented: $isConfirmingDelete) {
+             Button("Cancel", role: .cancel) { }
+             Button("Delete", role: .destructive) {
+                 if let original = originalShift {
+-                    store.deleteShift(original.id)
+-                    // TODO (Phase 4): 이 근무의 알람·리마인더 취소
++                    store.deleteShift(original.id)   // 알람·리마인더는 ShiftStore가 자동으로 다시 맞춤
+                 }
+                 finish()
+             }
+@@ -224,7 +270,7 @@
+             }
+             store.updateShift(updated)
+         }
+-        // TODO (Phase 4): 이 근무의 알람·리마인더 예약/다시 예약
++        tutorial.advance(from: .manualEntry, to: .shiftsAdded)
+         finish()
+     }
+     
+@@ -242,6 +288,7 @@
+         ShiftFormView(mode: .add(.now))
+     }
+     .environmentObject(ShiftStore.sample)
++    .environmentObject(TutorialController())
+ }
+ 
+ #Preview("Edit") {
+@@ -249,4 +296,5 @@
+         ShiftFormView(mode: .edit(SampleData.shifts[0]))
+     }
+     .environmentObject(ShiftStore.sample)
++    .environmentObject(TutorialController())
+ }
+diff -ruN before/TutorialOverlay.swift after/TutorialOverlay.swift
+--- before/TutorialOverlay.swift	1969-12-31 17:00:00.000000000 -0700
++++ after/TutorialOverlay.swift	2026-11-27 21:03:54.744255472 -0600
+@@ -0,0 +1,337 @@
++import SwiftUI
++
++// MARK: - 단계
++
++/// 튜토리얼 순서 (앱을 껐다 켜도 이어가도록 이름으로 저장)
++enum TutorialStep: String, CaseIterable {
++    case addSchedule        // Home: Add Schedule 버튼
++    case choosePhoto        // Add Schedule: 사진 선택 칸
++    case findShifts         // Add Schedule: Find my shifts 버튼
++    case reviewWorkplace    // Review: 직장 고르기
++    case reviewName         // Review: 근무표 속 내 이름
++    case reviewShifts       // Review: 근무 목록
++    case reviewSave         // Review: Add my shifts 버튼
++    case manualEntry        // 직접 입력 화면 (근무표를 못 읽었을 때)
++    case shiftsAdded        // Home: 근무 추가 완료 → 알람 설정으로
++    case wakeUpAlarm        // Settings: Wake-up alarm 줄
++    case reminders          // Settings: Shift reminders 줄 + 알림 허용
++    case finished           // 축하
++    
++    /// 강조할 대상 (nil이면 스포트라이트 없이 말풍선만)
++    var target: TutorialTarget? {
++        switch self {
++        case .addSchedule:     .addScheduleButton
++        case .choosePhoto:     .photoPicker
++        case .findShifts:      .findShiftsButton
++        case .reviewWorkplace: .reviewWorkplace
++        case .reviewName:      .reviewName
++        case .reviewShifts:    .reviewShifts
++        case .reviewSave:      .reviewSaveButton
++        case .wakeUpAlarm:     .wakeUpAlarmRow
++        case .reminders:       .remindersRow
++        case .manualEntry, .shiftsAdded, .finished: nil
++        }
++    }
++    
++    func message(name: String) -> String {
++        switch self {
++        case .addSchedule:     "Let’s add your schedule! Tap here to upload a screenshot."
++        case .choosePhoto:     "Pick a screenshot of your work schedule."
++        case .findShifts:      "Now tap here. I’ll find your shifts for you."
++        case .reviewWorkplace: "Pick the workplace this schedule is for."
++        case .reviewName:      "Now find your name on the schedule. Tap it if it’s not right."
++        case .reviewShifts:    "Check your shifts. Tap one to fix it."
++        case .reviewSave:      "Looks good? Add them!"
++        case .manualEntry:     "No problem! Fill in your shift and tap Save."
++        case .shiftsAdded:     "Your shifts are in! Next, let’s set up your alarms."
++        case .wakeUpAlarm:     "Your wake-up alarm rings before each shift. Tap here anytime to change when."
++        case .reminders:       "I’ll also remind you before your shifts. Allow notifications so you don’t miss them."
++        case .finished:        name.isEmpty ? "You’re all set!" : "You’re all set, \(name)!"
++        }
++    }
++    
++    /// 말풍선 버튼 (nil이면 강조된 진짜 버튼을 눌러야 넘어감)
++    var primaryTitle: String? {
++        switch self {
++        case .reviewWorkplace, .reviewName, .reviewShifts, .wakeUpAlarm: "Next"
++        case .shiftsAdded:  "Set up alarms"
++        case .reminders:    "Allow notifications"
++        case .finished:     "Done"
++        default:            nil
++        }
++    }
++}
++
++/// 스포트라이트로 강조할 수 있는 화면 요소 이름표
++enum TutorialTarget: Hashable {
++    case addScheduleButton, photoPicker, findShiftsButton
++    case reviewWorkplace, reviewName, reviewShifts, reviewSaveButton
++    case wakeUpAlarmRow, remindersRow
++}
++
++// MARK: - 진행 관리
++
++/// 지금 튜토리얼이 몇 단계인지 관리하고 기기에 저장 (도중에 꺼도 이어서)
++@MainActor
++final class TutorialController: ObservableObject {
++    @Published private(set) var step: TutorialStep?
++    @Published var requestedTab: AppTab?            // 튜토리얼이 탭을 바꿔달라고 요청할 때
++    
++    private static let stepKey = "tutorialStep"
++    
++    init() {
++        startIfPending()
++    }
++    
++    var isActive: Bool { step != nil }
++    
++    /// 말풍선에서 불러줄 이름
++    var userName: String {
++        UserDefaults.standard.string(forKey: AppStorageKey.userName) ?? ""
++    }
++    
++    /// 온보딩에서 Show me how를 눌렀다면 시작 (저장된 단계가 있으면 거기서부터)
++    func startIfPending() {
++        let defaults = UserDefaults.standard
++        guard defaults.bool(forKey: AppStorageKey.tutorialPending) else { return }
++        step = defaults.string(forKey: Self.stepKey).flatMap(TutorialStep.init(rawValue:)) ?? .addSchedule
++    }
++    
++    /// 지금 단계가 current일 때만 다음으로 (다른 화면에서 잘못 넘어가지 않게)
++    func advance(from current: TutorialStep, to next: TutorialStep) {
++        advance(fromAny: [current], to: next)
++    }
++    
++    /// 지금 단계가 목록 중 하나일 때만 다음으로
++    func advance(fromAny steps: [TutorialStep], to next: TutorialStep) {
++        guard let step, steps.contains(step) else { return }
++        withAnimation(.easeInOut(duration: 0.25)) {
++            self.step = next
++        }
++        UserDefaults.standard.set(next.rawValue, forKey: Self.stepKey)
++    }
++    
++    /// Home의 "Set up alarms" → Settings 탭으로
++    func goToSettings() {
++        guard step == .shiftsAdded else { return }
++        advance(from: .shiftsAdded, to: .wakeUpAlarm)
++        requestedTab = .settings
++    }
++    
++    /// 건너뛰기·완료: 튜토리얼 끝 (다시 나오지 않음)
++    func end() {
++        withAnimation(.easeInOut(duration: 0.25)) {
++            step = nil
++        }
++        UserDefaults.standard.removeObject(forKey: Self.stepKey)
++        UserDefaults.standard.set(false, forKey: AppStorageKey.tutorialPending)
++    }
++    
++    /// 개발용: 처음부터 다시 (TODO: 출시 전 삭제)
++    func restart() {
++        UserDefaults.standard.set(true, forKey: AppStorageKey.tutorialPending)
++        UserDefaults.standard.removeObject(forKey: Self.stepKey)
++        withAnimation(.easeInOut(duration: 0.25)) {
++            step = .addSchedule
++        }
++        requestedTab = .home
++    }
++}
++
++// MARK: - 이름표 위치 모으기
++
++struct TutorialAnchorKey: PreferenceKey {
++    static let defaultValue: [TutorialTarget: Anchor<CGRect>] = [:]
++    
++    static func reduce(value: inout [TutorialTarget: Anchor<CGRect>],
++                       nextValue: () -> [TutorialTarget: Anchor<CGRect>]) {
++        value.merge(nextValue()) { _, new in new }
++    }
++}
++
++extension View {
++    /// 이 요소에 튜토리얼 이름표 붙이기
++    func tutorialTarget(_ target: TutorialTarget) -> some View {
++        anchorPreference(key: TutorialAnchorKey.self, value: .bounds) { [target: $0] }
++    }
++    
++    /// 이 화면 위에 튜토리얼 띄우기 (step이 nil이면 아무것도 안 보임)
++    func tutorialOverlay(step: TutorialStep?, name: String,
++                         onPrimary: @escaping () -> Void,
++                         onSkip: @escaping () -> Void) -> some View {
++        overlayPreferenceValue(TutorialAnchorKey.self) { anchors in
++            if let step {
++                TutorialOverlay(step: step, name: name, anchors: anchors,
++                                onPrimary: onPrimary, onSkip: onSkip)
++                .transition(.opacity)
++            }
++        }
++    }
++    
++    /// 화면에서 쓰기 쉬운 버전: 이 화면이 담당하는 단계일 때만 보여줌
++    @MainActor
++    func tutorialOverlay(_ tutorial: TutorialController,
++                         showing steps: Set<TutorialStep>,
++                         isHidden: Bool = false,
++                         onPrimary: @escaping (TutorialStep) -> Void = { _ in }) -> some View {
++        let current = tutorial.step
++        let isMine = current.map { steps.contains($0) } ?? false
++        let visible: TutorialStep? = (isMine && !isHidden) ? current : nil
++        return tutorialOverlay(
++            step: visible,
++            name: tutorial.userName,
++            onPrimary: { if let current { onPrimary(current) } },
++            onSkip: { tutorial.end() }
++        )
++    }
++}
++
++// MARK: - 스포트라이트 + 말풍선
++
++struct TutorialOverlay: View {
++    let step: TutorialStep
++    let name: String
++    let anchors: [TutorialTarget: Anchor<CGRect>]
++    let onPrimary: () -> Void
++    let onSkip: () -> Void
++    
++    @State private var isPulsing = false
++    
++    var body: some View {
++        GeometryReader { proxy in
++            let spot = spotlightRect(in: proxy)
++            
++            ZStack(alignment: .topLeading) {
++                // 어두운 막 (강조 부분만 뚫림). 터치는 막지 않음
++                SpotlightShape(cutout: spot)
++                    .fill(Color.black.opacity(0.45), style: FillStyle(eoFill: true))
++                    .allowsHitTesting(false)
++                
++                // 강조 테두리 (살짝 숨 쉬듯)
++                if let spot {
++                    RoundedRectangle(cornerRadius: 14)
++                        .stroke(Color.white, lineWidth: 2)
++                        .frame(width: spot.width, height: spot.height)
++                        .scaleEffect(isPulsing ? 1.03 : 1)
++                        .position(x: spot.midX, y: spot.midY)
++                        .allowsHitTesting(false)
++                }
++                
++                bubbleLayer(spot: spot, size: proxy.size)
++            }
++        }
++        .ignoresSafeArea()
++        .onAppear {
++            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
++                isPulsing = true
++            }
++        }
++    }
++    
++    private func spotlightRect(in proxy: GeometryProxy) -> CGRect? {
++        guard let target = step.target, let anchor = anchors[target] else { return nil }
++        return proxy[anchor].insetBy(dx: -8, dy: -8)
++    }
++    
++    /// 강조 대상이 위쪽이면 말풍선은 아래, 아래쪽이면 위. 대상이 없으면 가운데
++    @ViewBuilder
++    private func bubbleLayer(spot: CGRect?, size: CGSize) -> some View {
++        let bubble = TutorialBubble(
++            message: step.message(name: name),
++            primaryTitle: step.primaryTitle,
++            isCelebration: step == .finished,
++            onPrimary: onPrimary,
++            onSkip: onSkip
++        )
++            .frame(maxWidth: 380)
++            .padding(.horizontal, 16)
++        
++        VStack(spacing: 0) {
++            if let spot {
++                if spot.midY < size.height * 0.5 {
++                    Color.clear.frame(height: spot.maxY + 12)
++                    bubble
++                    Spacer(minLength: 0)
++                } else {
++                    Spacer(minLength: 0)
++                    bubble
++                    Color.clear.frame(height: max(0, size.height - spot.minY + 12))
++                }
++            } else if step == .manualEntry {
++                Spacer(minLength: 0)
++                bubble
++                Color.clear.frame(height: 110)        // 아래쪽 (입력 칸을 가리지 않게)
++            } else {
++                Spacer(minLength: 0)
++                bubble
++                Spacer(minLength: 0)
++            }
++        }
++        .frame(width: size.width, height: size.height)
++    }
++}
++
++/// 화면 전체를 덮되, cutout 부분만 뚫린 모양
++struct SpotlightShape: Shape {
++    var cutout: CGRect?
++    
++    func path(in rect: CGRect) -> Path {
++        var path = Path(rect)
++        if let cutout {
++            path.addRoundedRect(in: cutout, cornerSize: CGSize(width: 14, height: 14))
++        }
++        return path
++    }
++}
++
++// MARK: - 말풍선 (작은 캐릭터 + 문구 + 버튼)
++
++struct TutorialBubble: View {
++    let message: String
++    let primaryTitle: String?
++    var isCelebration = false
++    let onPrimary: () -> Void
++    let onSkip: () -> Void
++    
++    var body: some View {
++        VStack(alignment: .leading, spacing: 14) {
++            HStack(alignment: .center, spacing: 12) {
++                IdleMascot(size: 44, mood: isCelebration ? .happy : .calm)
++                Text(message)
++                    .font(AppFont.montserrat(14, .medium, relativeTo: .subheadline))
++                    .fixedSize(horizontal: false, vertical: true)
++                Spacer(minLength: 0)
++            }
++            
++            HStack {
++                if !isCelebration {
++                    Button("Skip tutorial", action: onSkip)
++                        .font(AppFont.montserrat(12, relativeTo: .footnote))
++                        .underline()
++                        .foregroundStyle(AppColor.primary.opacity(0.6))
++                        .buttonStyle(.plain)
++                }
++                Spacer()
++                if let primaryTitle {
++                    Button(action: onPrimary) {
++                        Text(primaryTitle)
++                            .font(AppFont.montserrat(13, .semibold, relativeTo: .subheadline))
++                            .foregroundStyle(AppColor.background)
++                            .padding(.horizontal, 16)
++                            .padding(.vertical, 9)
++                            .background(AppColor.primary, in: Capsule())
++                    }
++                    .buttonStyle(.plain)
++                }
++            }
++        }
++        .padding(16)
++        .foregroundStyle(AppColor.primary)
++        .background(ScheduleLoadingView.cardColor, in: RoundedRectangle(cornerRadius: 10))
++        .overlay(
++            RoundedRectangle(cornerRadius: 10)
++                .stroke(AppColor.muted, lineWidth: 1)
++        )
++        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
++    }
++}
+diff -ruN before/WorkplaceDialogs.swift after/WorkplaceDialogs.swift
+--- before/WorkplaceDialogs.swift	2026-11-27 21:03:54.739733887 -0600
++++ after/WorkplaceDialogs.swift	2026-11-27 21:03:54.745184751 -0600
+@@ -56,13 +56,16 @@
+ struct WorkplaceDialog: View {
+     let title: String
+     let saveTitle: String
+-    let onSave: (_ name: String, _ nameOnSchedule: String) -> Void
++    let onSave: (_ name: String, _ nameOnSchedule: String, _ closingMinutes: Int?) -> Void
+     let onClose: () -> Void
+     
+     private let initialName: String
+     private let initialNameOnSchedule: String
++    private let initialClosingMinutes: Int?
+     @State private var name: String
+     @State private var nameOnSchedule: String
++    @State private var hasClosingTime: Bool
++    @State private var closingTime: Date
+     @FocusState private var focusedField: Field?
+     
+     private enum Field { case name, nameOnSchedule }
+@@ -72,7 +75,8 @@
+         saveTitle: String,
+         initialName: String = "",
+         initialNameOnSchedule: String = "",
+-        onSave: @escaping (_ name: String, _ nameOnSchedule: String) -> Void,
++        initialClosingMinutes: Int? = nil,
++        onSave: @escaping (_ name: String, _ nameOnSchedule: String, _ closingMinutes: Int?) -> Void,
+         onClose: @escaping () -> Void
+     ) {
+         self.title = title
+@@ -81,17 +85,25 @@
+         self.onClose = onClose
+         self.initialName = initialName
+         self.initialNameOnSchedule = initialNameOnSchedule
++        self.initialClosingMinutes = initialClosingMinutes
+         _name = State(initialValue: initialName)
+         _nameOnSchedule = State(initialValue: initialNameOnSchedule)
++        _hasClosingTime = State(initialValue: initialClosingMinutes != nil)
++        let minutes = initialClosingMinutes ?? 22 * 60     // 처음 정할 때는 오후 10시로 제안
++        _closingTime = State(initialValue: Calendar.current.date(
++            bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: .now) ?? .now)
+     }
+     
+     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+     private var trimmedNameOnSchedule: String { nameOnSchedule.trimmingCharacters(in: .whitespacesAndNewlines) }
++    private var closingMinutes: Int? { hasClosingTime ? ClosingTime.minutes(from: closingTime) : nil }
+     
+     /// 두 칸 모두 채워져 있고, 처음 값에서 바뀐 게 있어야 저장 가능
+     private var canSave: Bool {
+         !trimmedName.isEmpty && !trimmedNameOnSchedule.isEmpty
+-        && (trimmedName != initialName || trimmedNameOnSchedule != initialNameOnSchedule)
++        && (trimmedName != initialName
++            || trimmedNameOnSchedule != initialNameOnSchedule
++            || closingMinutes != initialClosingMinutes)
+     }
+     
+     var body: some View {
+@@ -124,8 +136,17 @@
+                 .cardStyle()
+                 .padding(.top, 8)
+             
++            FieldLabel("CLOSING TIME (OPTIONAL)")
++                .padding(.top, 20)
++            closingTimeRow
++                .padding(.top, 8)
++            Text("Used for shifts marked “CL” or “Close”.")
++                .font(AppFont.montserrat(11, relativeTo: .caption))
++                .foregroundStyle(AppColor.primary.opacity(0.6))
++                .padding(.top, 6)
++            
+             PrimaryButton(title: saveTitle, minHeight: 48) {
+-                onSave(trimmedName, trimmedNameOnSchedule)
++                onSave(trimmedName, trimmedNameOnSchedule, closingMinutes)
+             }
+             .disabled(!canSave)
+             .padding(.top, 24)
+@@ -134,6 +155,45 @@
+             if initialName.isEmpty { focusedField = .name }   // 추가할 때만 첫 칸에 커서
+         }
+     }
++    
++    /// 마감 시간: 없으면 "Set" 버튼, 있으면 시간 선택기 + Remove
++    @ViewBuilder
++    private var closingTimeRow: some View {
++        if hasClosingTime {
++            HStack {
++                DatePicker("Closing time", selection: $closingTime, displayedComponents: .hourAndMinute)
++                    .labelsHidden()
++                Spacer()
++                Button("Remove") {
++                    hasClosingTime = false
++                }
++                .font(AppFont.montserrat(13, .medium, relativeTo: .subheadline))
++                .underline()
++                .buttonStyle(.plain)
++            }
++            .padding(.horizontal, 14)
++            .frame(minHeight: 44)
++            .cardStyle()
++        } else {
++            Button {
++                hasClosingTime = true
++            } label: {
++                HStack {
++                    Text("Not set")
++                        .foregroundStyle(AppColor.primary.opacity(0.6))
++                    Spacer()
++                    Text("Set closing time")
++                        .underline()
++                }
++                .font(AppFont.montserrat(13, relativeTo: .subheadline))
++                .padding(.horizontal, 14)
++                .frame(minHeight: 44)
++                .contentShape(Rectangle())
++                .cardStyle()
++            }
++            .buttonStyle(.plain)
++        }
++    }
+ }
+ 
+ // MARK: - 직장 삭제 확인 창
